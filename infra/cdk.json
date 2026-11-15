@@ -1,0 +1,12 @@
+{
+  "app": "npx tsx bin/strikezone.ts",
+  "build": "npm --prefix ../game run build",
+  "watch": {
+    "include": ["bin/**", "lib/**"],
+    "exclude": ["README.md", "cdk*.json", "**/*.d.ts", "**/*.js", "node_modules", "test"]
+  },
+  "context": {
+    "@aws-cdk/core:checkSecretUsage": true,
+    "@aws-cdk/aws-iam:minimizePolicies": true
+  }
+}

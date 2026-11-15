@@ -1,0 +1,43 @@
+{
+  "name": "strikezone-infra",
+  "version": "0.1.0",
+  "private": true,
+  "description": "StrikeZone hosting: one CDK v2 stack (private S3 + CloudFront OAC) that serves game/dist.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "synth": "cdk synth --quiet && node -e \"require('fs').rmSync('cdk.out',{recursive:true,force:true})\"",
+    "audit": "npm audit --audit-level=high || true",
+    "verify": "npm run lint && npm run typecheck && npm test && npm run synth && npm run audit",
+    "preflight": "tsx scripts/preflight.ts",
+    "stack-status": "tsx scripts/stack-status.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "deploy": "npm run preflight && cdk deploy --all --require-approval never --outputs-file cdk-outputs.json && npm run stack-status && npm run smoke && node -e \"require('fs').rmSync('cdk.out',{recursive:true,force:true})\"",
+    "destroy": "cdk destroy --all"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "2.277.0",
+    "constructs": "10.8.1"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-cloudformation": "3.1169.0",
+    "@aws-sdk/client-ssm": "3.1169.0",
+    "@aws-sdk/client-sts": "3.1169.0",
+    "@eslint/js": "^9.39.0",
+    "@types/node": "^22.19.0",
+    "@vitest/coverage-v8": "^4.1.12",
+    "aws-cdk": "2.1148.1",
+    "eslint": "^9.39.0",
+    "prettier": "^3.10.1",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^4.1.12"
+  }
+}
