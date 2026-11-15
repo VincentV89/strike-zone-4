@@ -1,0 +1,12 @@
+{
+  "name": "strikezone",
+  "version": "0.1.0",
+  "private": true,
+  "description": "StrikeZone: browser 3D tactical shooter against bots. game/ (Vite) and infra/ (CDK v2) are independent npm packages; this root only chains their scripts.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "verify": "npm --prefix infra run verify",
+    "deploy": "npm --prefix infra run deploy",
+    "destroy": "npm --prefix infra exec -- cdk destroy --all"
+  }
+}
