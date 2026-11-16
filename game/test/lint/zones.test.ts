@@ -781,3 +781,122 @@ describe('ui and persistence zones (hand-pinned)', () => {
     expect(await ruleHits(importOf('@sz/ui'), 'src/app/main.ts', 'no-restricted-imports')).toBe(0);
   });
 });
+
+// Hand-pinned presentation-3d canaries (security-design-presentation-3d SD-R-1).
+describe('render and assets zones (SD-R-1, hand-pinned)', () => {
+  const gl = 'src/render/gl/x.ts';
+  const core = 'src/render/core/x.ts';
+  const assetsCore = 'src/assets/core/x.ts';
+
+  it.each([
+    ["import * as THREE from 'three';\nexport const a = THREE;\n", 'namespace import'],
+    ["import { TextureLoader } from 'three';\nexport const a = TextureLoader;\n", 'URL loader'],
+    [
+      "import { LoadingManager } from 'three';\nexport const a = LoadingManager;\n",
+      'loading manager',
+    ],
+    [
+      "import { PCFSoftShadowMap } from 'three';\nexport const a = PCFSoftShadowMap;\n",
+      'removed shadow type',
+    ],
+    ["import { WebGPURenderer } from 'three';\nexport const a = WebGPURenderer;\n", 'WebGPU'],
+    [
+      "import { setConsoleFunction } from 'three';\nexport const a = setConsoleFunction;\n",
+      'console hook',
+    ],
+    [
+      "export const f = (gl: { getExtension(s: string): unknown }) => gl.getExtension('WEBGL_debug_renderer_info');\n",
+      'GPU fingerprint',
+    ],
+    [
+      'export function f(): number {\n  try {\n    return 1;\n  } catch {\n    return 0;\n  }\n}\n',
+      'try statement',
+    ],
+    ["export const f = (x: { innerHTML: string }) => { x.innerHTML = 's'; };\n", 'HTML sink'],
+    [
+      "export const f = (d: { createElement(s: string): unknown }) => d.createElement('canvas');\n",
+      'DOM creation',
+    ],
+    ['export const f = (gl: { readPixels(): void }) => { gl.readPixels(); };\n', 'pixel readback'],
+    [
+      "import { createSim } from '@sz/sim';\nexport const a = createSim;\n",
+      'value import of @sz/sim',
+    ],
+    [
+      "import { desertCompound } from '@sz/maps';\nexport const a = desertCompound;\n",
+      'value import of @sz/maps',
+    ],
+    [
+      "import { createEventBus } from '@sz/kernel';\nexport const a = createEventBus;\n",
+      'event bus',
+    ],
+    ["export const m = import('three');\n", 'dynamic import'],
+  ])('gl forbids: %s (%s)', async (code) => {
+    expect(await ruleHits(code, gl, 'no-restricted-syntax')).toBeGreaterThanOrEqual(1);
+  });
+
+  it('gl may use named three imports, BufferGeometryUtils, sim types and core modules', async () => {
+    for (const spec of [
+      'three',
+      'three/addons/utils/BufferGeometryUtils.js',
+      '@sz/render/core/frame',
+      '@sz/assets/core/errors',
+    ]) {
+      expect(await ruleHits(importOf(spec), gl, 'no-restricted-imports')).toBe(0);
+    }
+    const ok = "import type { SimSnapshot } from '@sz/sim';\nexport type A = SimSnapshot;\n";
+    expect(await ruleHits(ok, gl, 'no-restricted-syntax')).toBe(0);
+    const named = "import { Mesh } from 'three';\nexport const a = Mesh;\n";
+    expect(await ruleHits(named, gl, 'no-restricted-syntax')).toBe(0);
+  });
+
+  it.each([
+    'globalThis',
+    'fetch',
+    'window',
+    'document',
+    'performance',
+    'Date',
+    'console',
+    'setTimeout',
+    'requestAnimationFrame',
+  ])('gl and core forbid the global %s', async (name) => {
+    for (const file of [gl, core, assetsCore]) {
+      expect(await ruleHits(`export const g = ${name};\n`, file, 'no-restricted-globals')).toBe(1);
+    }
+  });
+
+  it('core is three-free, even for types, and names no DOM or GL type', async () => {
+    const typeImport = "import type { Matrix4 } from 'three';\nexport type M = Matrix4;\n";
+    expect(await ruleHits(typeImport, core, 'no-restricted-imports')).toBe(1);
+    expect(await ruleHits(typeImport, assetsCore, 'no-restricted-imports')).toBe(1);
+    const dom = 'export const f = (c: HTMLCanvasElement) => c;\n';
+    expect(await ruleHits(dom, core, 'no-restricted-syntax')).toBe(1);
+    expect(await ruleHits(dom, gl, 'no-restricted-syntax')).toBe(0);
+    const glType = 'export const f = (c: WebGL2RenderingContext) => c;\n';
+    expect(await ruleHits(glType, assetsCore, 'no-restricted-syntax')).toBe(1);
+  });
+
+  it('core still bans try, the namespace import and value imports of sim (parent entries repeated)', async () => {
+    const t =
+      'export function f(): number {\n  try {\n    return 1;\n  } catch {\n    return 0;\n  }\n}\n';
+    expect(await ruleHits(t, core, 'no-restricted-syntax')).toBe(1);
+    const sim = "import { createSim } from '@sz/sim';\nexport const a = createSim;\n";
+    expect(await ruleHits(sim, core, 'no-restricted-syntax')).toBe(1);
+  });
+
+  it('render/core and assets/core each match exactly one zone', () => {
+    const matches = (zone: Zone, rel: string) => {
+      const inside = (glob: string) => rel.startsWith(glob.replace('**', ''));
+      return zone.files.some(inside) && !(zone.ignores ?? []).some(inside);
+    };
+    for (const rel of [
+      'src/render/core/x.ts',
+      'src/assets/core/x.ts',
+      'src/render/gl/x.ts',
+      'src/assets/gl/x.ts',
+    ]) {
+      expect(ZONES.filter((z) => matches(z, rel))).toHaveLength(1);
+    }
+  });
+});

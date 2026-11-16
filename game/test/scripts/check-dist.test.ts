@@ -2,7 +2,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { checkDist, findExternalUrls, findIndexHtmlProblems } from '../../scripts/check-dist.mjs';
+import {
+  checkDist,
+  findDynamicCode,
+  findExternalUrls,
+  findIndexHtmlProblems,
+  sizeReport,
+} from '../../scripts/check-dist.mjs';
 
 const GOOD_INDEX =
   '<!doctype html><html><head><script type="module" crossorigin src="/assets/index-abc.js"></script></head><body></body></html>';
@@ -139,6 +145,101 @@ describe('check-dist (SD-K-3)', () => {
         'dist/assets/index-1.css: external URL http://www.w3.org/2000/svg',
         'dist/assets/index-1.js: external URL http://www.w3.org/2000/svgx',
       ]);
+    });
+  });
+
+  describe('presentation-3d rules (SD-R-4)', () => {
+    it('allows only the exact XHTML namespace URL in code', () => {
+      const ok = makeRoot({
+        'dist/index.html': GOOD_INDEX,
+        'dist/assets/three-1.js': 'createElementNS("http://www.w3.org/1999/xhtml","canvas")',
+      });
+      expect(checkDist(ok)).toEqual([]);
+      const bad = makeRoot({
+        'dist/index.html': GOOD_INDEX,
+        'dist/assets/a.js':
+          'a="http://www.w3.org/1999/xhtml-evil";b="https://www.w3.org/1999/xhtml"',
+        'dist/assets/n.css': 'x{u:"http://www.w3.org/1999/xhtml"}',
+      });
+      expect(checkDist(bad).sort()).toEqual([
+        'dist/assets/a.js: external URL http://www.w3.org/1999/xhtml-evil',
+        'dist/assets/a.js: external URL https://www.w3.org/1999/xhtml',
+        'dist/assets/n.css: external URL http://www.w3.org/1999/xhtml',
+      ]);
+    });
+
+    it('fails on binary assets (CMP-R-02)', () => {
+      const root = makeRoot({
+        'dist/index.html': GOOD_INDEX,
+        'dist/assets/tex.png': 'x',
+        'dist/assets/m.glb': 'x',
+        'dist/favicon.svg': '<svg/>',
+      });
+      expect(checkDist(root).sort()).toEqual([
+        'dist/assets/m.glb: binary asset in dist (CMP-R-02)',
+        'dist/assets/tex.png: binary asset in dist (CMP-R-02)',
+        'dist/favicon.svg: binary asset in dist (CMP-R-02)',
+      ]);
+    });
+
+    it('fails on eval( and new Function in code (SEC-R-10)', () => {
+      expect(findDynamicCode('x=eval("1")')).toEqual(['eval(']);
+      expect(findDynamicCode('f=new Function("a","return a")')).toEqual(['new Function']);
+      expect(findDynamicCode('retrieval(1); o.eval(2); evaluate(3)')).toEqual([]);
+      const root = makeRoot({ 'dist/index.html': GOOD_INDEX, 'dist/assets/a.js': 'eval (x)' });
+      expect(checkDist(root)).toEqual(['dist/assets/a.js: eval( (SEC-R-10)']);
+    });
+
+    it('WebGPU marker matches the class name but not isWebGPURenderer (NFR-R-S2)', () => {
+      const ok = makeRoot({
+        'dist/index.html': GOOD_INDEX,
+        'dist/assets/a.js': 'if(r.isWebGPURenderer){}',
+      });
+      expect(checkDist(ok)).toEqual([]);
+      for (const code of ['class WebGPURenderer{}', 'n="WebGPURenderer"']) {
+        const bad = makeRoot({ 'dist/index.html': GOOD_INDEX, 'dist/assets/a.js': code });
+        expect(checkDist(bad)).toEqual(['dist/assets/a.js: WebGPURenderer in bundle (NFR-R-S2)']);
+      }
+    });
+
+    it('requires the three MIT notice when three is a dependency (CMP-R-01)', () => {
+      const pkg = JSON.stringify({ dependencies: { three: '~0.187.0' } });
+      const base = { 'package.json': pkg, 'dist/index.html': GOOD_INDEX };
+      expect(checkDist(makeRoot(base))[0]).toContain('found 0');
+      const good = 'three 0.187.0 (MIT License)\nCopyright © 2010-2026 three.js authors\n';
+      expect(
+        checkDist(makeRoot({ ...base, 'dist/assets/third-party-notices-q.txt': good })),
+      ).toEqual([]);
+      expect(
+        checkDist(makeRoot({ ...base, 'dist/assets/third-party-notices-q.txt': 'MIT License' })),
+      ).toEqual(['dist/assets/third-party-notices-q.txt: missing "three.js authors"']);
+    });
+
+    it("needs both packages' notice text when Rapier and three ship", () => {
+      const pkg = JSON.stringify({
+        dependencies: { three: '~0.187.0', '@dimforge/rapier3d-compat': '~0.21.0' },
+      });
+      const notice =
+        'three.js authors MIT License\n@dimforge/rapier3d-compat Apache License Version 2.0';
+      const root = makeRoot({
+        'package.json': pkg,
+        'dist/index.html': GOOD_INDEX,
+        'dist/assets/third-party-notices-z.txt': notice,
+      });
+      expect(checkDist(root)).toEqual([]);
+    });
+
+    it('prints an advisory size line per chunk and a total', () => {
+      const root = makeRoot({
+        'dist/index.html': GOOD_INDEX,
+        'dist/assets/b.js': 'x=1;',
+        'dist/assets/a.js': 'y',
+      });
+      const lines = sizeReport(root);
+      expect(lines).toHaveLength(3);
+      expect(lines[0]).toMatch(/^check:dist size a\.js: 1 B raw, \d+ B gzip$/);
+      expect(lines[2]).toMatch(/total: 5 B raw/);
+      expect(sizeReport(makeRoot({}))).toEqual([]);
     });
   });
 });
