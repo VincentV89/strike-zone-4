@@ -84,6 +84,26 @@ audio.duck(paused);
 - Map tests run every map in `test/maps/shipped-maps.ts` against real Rapier, including a link walk with the real character controller. Rapier suites skip only when `SZ_ALLOW_RAPIER_SKIP=1` is set.
 - The build emits `assets/third-party-notices-<hash>.txt` (Rapier's Apache-2.0 licence); `check:dist` requires it.
 
+## Presentation (`src/render/`, `src/assets/`)
+
+presentation-3d is the only Three.js importer (three ~0.187.0, WebGLRenderer only). It reads frozen
+`SimSnapshot`s and the drained bus events and never writes simulation state.
+
+- `core/` folders are pure (no three, no DOM) and counted by coverage (90/85): presets, FOV and
+  camera maths, effect pools, event mapping, bot slots with near/far shadow split, rig forward
+  kinematics, the scene plan (draw-call and triangle budgets), procedural texture pixels and part
+  tables. `gl/` folders hold the Three.js glue and are excluded from coverage.
+- Zones: `render and assets (L3)` and `render/assets core (L3-pure)` in `eslint.zones.mjs`. They ban
+  DOM, I/O, timer and clock globals, URL loaders, WebGPU, namespace imports from three, `try`, and
+  value imports of `@sz/sim`/`@sz/maps`/`@sz/assets`. gl files import core modules by alias
+  (`@sz/render/core/<module>`).
+- app-shell boot order: `createAssetFactory({ yieldToHost })` → `createRenderer({ canvas, assets,
+devicePixelRatio, onContextLost, onContextRestored })` → run `assets.loadSteps()` → `loadMap(map)`
+  → `beginRound()` → per frame `render({ prev, curr, alpha, events: <drained>, dtSec, paused })`.
+  Pass `paused: false` during the end-of-round hold so death reactions finish.
+- Texture digests in `test/assets/core/textures.test.ts` are literals; a deliberate texture change
+  updates them in the same commit.
+
 ## Rules for later units
 
 - Never put files in `public/`: Vite copies them unhashed and hosting caches them for a year.

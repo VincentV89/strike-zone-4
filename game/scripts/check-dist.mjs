@@ -3,11 +3,36 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 
 const TEXT_EXTENSIONS = /\.(html|js|mjs|css|json|svg|txt|map)$/i;
 
 /** SEC-A-10 / BR-A-60: every sound is synthesised at boot, so no audio file may ship. */
 export const AUDIO_FILE_EXTENSIONS = /\.(wav|mp3|ogg|m4a|flac|webm|aac)$/i;
+
+/** SD-R-4 / CMP-R-02: every image, model and font is procedural, so no binary asset may ship. */
+export const BINARY_ASSET_EXTENSIONS =
+  /\.(png|jpe?g|gif|webp|avif|bmp|svg|glb|gltf|bin|ktx2|basis|hdr|exr|ttf|otf|woff2?)$/i;
+
+/**
+ * SD-R-4: the only URL allowed in code is three's createElementNS namespace, by exact match.
+ * Measured in three 0.187.0 (tech-stack-decisions-presentation-3d).
+ */
+export const CODE_ALLOWED_URLS = new Set(['http://www.w3.org/1999/xhtml']);
+
+/** SEC-R-10: the hosting CSP has no 'unsafe-eval'; fail the build before a browser would. */
+export function findDynamicCode(text) {
+  const hits = [];
+  if (/(?<![\w$.])eval\s*\(/.test(text)) hits.push('eval(');
+  if (/\bnew\s+Function\s*\(/.test(text)) hits.push('new Function');
+  return hits;
+}
+
+/**
+ * NFR-R-S2: no WebGPU renderer in the bundle. Word boundaries, because three.core.js contains
+ * `renderer.isWebGPURenderer` (BatchedMesh) even in a WebGL-only build.
+ */
+export const WEBGPU_MARKER = /\bWebGPURenderer\b/;
 
 /** Removes /*! ... *\/ licence banners and sourceMappingURL lines before the URL scan. */
 export function stripAllowedUrlContext(text) {
@@ -36,17 +61,30 @@ export const NOTICE_ALLOWED_URLS = new Set([
   'http://www.apache.org/licenses/',
   'http://www.apache.org/licenses/LICENSE-2.0',
 ]);
-const NOTICE_REQUIRED_TEXT = ['Apache License', 'Version 2.0', '@dimforge/rapier3d-compat'];
+/** Required notice text per runtime dependency (SD-WM-11, CMP-R-01). */
+export const NOTICE_REQUIREMENTS = new Map([
+  ['@dimforge/rapier3d-compat', ['Apache License', 'Version 2.0', '@dimforge/rapier3d-compat']],
+  ['three', ['three.js authors', 'MIT License']],
+]);
+
+function runtimeDependencies(root) {
+  const pkgPath = join(root, 'package.json');
+  if (!existsSync(pkgPath)) return [];
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+  return Object.keys(pkg.dependencies ?? {});
+}
 
 /** True when the package at `root` ships Rapier, so the notice must be in dist/. */
 export function needsRapierNotice(root) {
-  const pkgPath = join(root, 'package.json');
-  if (!existsSync(pkgPath)) return false;
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
-  return Boolean(pkg.dependencies && pkg.dependencies['@dimforge/rapier3d-compat']);
+  return runtimeDependencies(root).includes('@dimforge/rapier3d-compat');
 }
 
-function checkNotice(dist, failures) {
+/** True when three is a runtime dependency; its MIT notice must be in dist/ (OI-L-3). */
+export function needsThreeNotice(root) {
+  return runtimeDependencies(root).includes('three');
+}
+
+function checkNotice(dist, failures, needles) {
   const assets = join(dist, 'assets');
   const notices = existsSync(assets)
     ? readdirSync(assets).filter((n) => NOTICE_PATTERN.test(n))
@@ -58,7 +96,7 @@ function checkNotice(dist, failures) {
     return;
   }
   const text = readFileSync(join(assets, notices[0]), 'utf8');
-  for (const needle of NOTICE_REQUIRED_TEXT) {
+  for (const needle of needles) {
     if (!text.includes(needle)) failures.push(`dist/assets/${notices[0]}: missing "${needle}"`);
   }
 }
@@ -87,18 +125,32 @@ export function checkDist(root) {
   }
   if (existsSync(dist)) {
     for (const file of listFiles(dist)) {
+      const rel = relative(root, file);
       if (AUDIO_FILE_EXTENSIONS.test(file)) {
-        failures.push(`${relative(root, file)}: audio file in dist (BR-A-60)`);
+        failures.push(`${rel}: audio file in dist (BR-A-60)`);
+        continue;
+      }
+      if (BINARY_ASSET_EXTENSIONS.test(file)) {
+        failures.push(`${rel}: binary asset in dist (CMP-R-02)`);
         continue;
       }
       if (!TEXT_EXTENSIONS.test(file)) continue;
+      const text = readFileSync(file, 'utf8');
       const isNotice = NOTICE_PATTERN.test(basename(file));
-      for (const url of findExternalUrls(readFileSync(file, 'utf8'))) {
+      const isCode = /\.m?js$/i.test(file);
+      for (const url of findExternalUrls(text)) {
         if (isNotice && NOTICE_ALLOWED_URLS.has(url)) continue;
-        failures.push(`${relative(root, file)}: external URL ${url}`);
+        if (isCode && CODE_ALLOWED_URLS.has(url)) continue;
+        failures.push(`${rel}: external URL ${url}`);
+      }
+      if (isCode) {
+        for (const hit of findDynamicCode(text)) failures.push(`${rel}: ${hit} (SEC-R-10)`);
+        if (WEBGPU_MARKER.test(text)) failures.push(`${rel}: WebGPURenderer in bundle (NFR-R-S2)`);
       }
     }
-    if (needsRapierNotice(root)) checkNotice(dist, failures);
+    const deps = runtimeDependencies(root);
+    const needles = deps.flatMap((d) => NOTICE_REQUIREMENTS.get(d) ?? []);
+    if (needles.length > 0) checkNotice(dist, failures, needles);
   }
   const pub = join(root, 'public');
   if (existsSync(pub) && readdirSync(pub).length > 0) {
@@ -107,8 +159,29 @@ export function checkDist(root) {
   return failures;
 }
 
+/** NFR-R-S1: advisory raw and gzip sizes of dist/assets/*.js. Never fails the check. */
+export function sizeReport(root) {
+  const assets = join(root, 'dist', 'assets');
+  if (!existsSync(assets)) return [];
+  let raw = 0;
+  let gz = 0;
+  const lines = [];
+  for (const name of readdirSync(assets)
+    .filter((n) => n.endsWith('.js'))
+    .sort()) {
+    const buf = readFileSync(join(assets, name));
+    const g = gzipSync(buf).length;
+    raw += buf.length;
+    gz += g;
+    lines.push(`check:dist size ${name}: ${buf.length} B raw, ${g} B gzip`);
+  }
+  lines.push(`check:dist size total: ${raw} B raw, ${gz} B gzip (advisory)`);
+  return lines;
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = fileURLToPath(new URL('..', import.meta.url));
+  for (const line of sizeReport(root)) console.log(line);
   const failures = checkDist(root);
   if (failures.length > 0) {
     for (const f of failures) console.error(`check:dist FAIL ${f}`);
