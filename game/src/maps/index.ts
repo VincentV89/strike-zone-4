@@ -20,3 +20,4 @@ export {
 export { footprint2d, quatFromYawPitch, rotateYawPitch, solidCorners, solidTop } from './geometry';
 export type { Quat } from './geometry';
 export { desertCompound } from './desert-compound';
+export { industrialWarehouse } from './industrial-warehouse';
