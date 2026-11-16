@@ -31,6 +31,9 @@ export default defineConfig({
       thresholds: {
         lines: 80,
         'src/kernel/**': { lines: 95, branches: 90 },
+        // ADR-WC-2: weapons-combat logic, same bar as the kernel.
+        'src/weapons/**': { lines: 95, branches: 90 },
+        'src/combat/**': { lines: 95, branches: 90 },
       },
     },
   },
