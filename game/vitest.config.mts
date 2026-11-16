@@ -16,8 +16,9 @@ export default defineConfig({
       // BR-K-57: the 80% floor applies to framework-free logic only. Every entry needs a reason.
       exclude: [
         'src/app/**', // bootstrap glue (rAF loop, DOM wiring)
-        'src/render/**', // Three.js / WebGL
-        'src/assets/**', // Three.js procedural asset factory
+        // presentation-3d (FD-R-7): only the Three.js/WebGL glue is excluded; core/ stays counted.
+        'src/render/gl/**', // Three.js scene glue and WebGL context
+        'src/assets/gl/**', // Three.js asset upload, materials and shader warmup
         'src/audio/web/**', // Web Audio adapter; audio core stays covered (BR-A-50)
         'src/input/dom/**', // DOM events and pointer lock; the pure input core stays covered
         'src/ui/dom/**', // DOM builders; ui view-model mappers stay covered
@@ -47,6 +48,9 @@ export default defineConfig({
         'src/sim/**': { lines: 90, branches: 85 },
         'src/round/**': { lines: 90, branches: 85 },
         'src/stats/**': { lines: 95, branches: 90 },
+        // presentation-3d (cicd-pipeline-presentation-3d, NFR-R-T1): pure render and asset logic.
+        'src/render/core/**': { lines: 90, branches: 85 },
+        'src/assets/core/**': { lines: 90, branches: 85 },
       },
     },
   },

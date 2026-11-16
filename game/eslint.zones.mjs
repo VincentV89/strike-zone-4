@@ -484,6 +484,151 @@ const MATCH_LOOP_ZONES = [
   },
 ];
 
+// ---- presentation-3d zones (security-design-presentation-3d SD-R-1) ----
+
+/** render and assets: no DOM globals, I/O, timers, clocks or escapes; DOM arrives as ports. */
+const RENDER_GLOBALS = uniqueByName([
+  ...named(
+    [
+      'window',
+      'document',
+      'navigator',
+      'location',
+      'localStorage',
+      'sessionStorage',
+      'indexedDB',
+      'caches',
+      'postMessage',
+      'requestAnimationFrame',
+      'performance',
+      'Date',
+      'crypto',
+      'importScripts',
+      ...NO_IO_GLOBAL_NAMES,
+      'eval',
+      'Function',
+      'Reflect',
+      'WebAssembly',
+    ],
+    'SD-R-1/SEC-R-01: render and assets have no DOM globals, I/O, timers, clocks or escapes',
+  ),
+]);
+
+const RENDER_SYNTAX = [
+  ...NO_DYNAMIC_IMPORT,
+  ...typeOnly('@sz/sim'),
+  ...typeOnly('@sz/maps'),
+  ...typeOnly('@sz/assets'),
+  AI_NO_BUS,
+  {
+    selector: 'ImportDeclaration[source.value=/^three/] > ImportNamespaceSpecifier',
+    message: 'SD-R-1: import named members from three (tree-shaking, API bans).',
+  },
+  {
+    selector:
+      "ImportDeclaration[source.value='three'] > ImportSpecifier[imported.name=/(Loader|LoadingManager)$|^(Cache|PCFSoftShadowMap|VSMShadowMap|WebGPURenderer|setConsoleFunction)$/]",
+    message:
+      'SEC-R-02/ADR-R-6/SEC-R-16: no loaders, removed shadow types, WebGPU or console hooks.',
+  },
+  {
+    selector:
+      'MemberExpression[property.name=/^(innerHTML|outerHTML|insertAdjacentHTML|createElement|createElementNS|createContextualFragment|srcdoc|defaultView|ownerDocument|getRootNode|parentElement|cookie|sendBeacon|setAnimationLoop|readPixels)$/]',
+    message:
+      'SEC-R-09: render uses only the injected canvas; no DOM creation, escape members or pixel readback.',
+  },
+  {
+    selector: 'Literal[value=/debug_renderer_info/i]',
+    message: 'SEC-R-15: never query GPU vendor or renderer strings.',
+  },
+  {
+    selector: 'TryStatement',
+    message: 'NFR-R-R5: bugs propagate to app-shell; the only conversion is runStep().',
+  },
+];
+
+const RENDER_ZONES = [
+  {
+    name: 'render and assets (L3)',
+    files: ['src/render/**', 'src/assets/**'],
+    ignores: ['src/render/core/**', 'src/assets/core/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!(@sz/(kernel|weapons|sim|maps|assets)|three|three/addons/utils/BufferGeometryUtils\\.js|@sz/(render|assets)/core/[a-z-]+)$)[^.]',
+        'SD-R-1: render/assets import only kernel, weapons, three (+BufferGeometryUtils), core modules, and sim/maps/assets types.',
+        [
+          'three/webgpu',
+          'three/tsl',
+          'three/addons',
+          'three/addons/loaders/GLTFLoader.js',
+          'three/examples/jsm/x.js',
+          'three/src/math/Matrix4.js',
+          '@sz/physics',
+          '@sz/round',
+          '@sz/ai',
+          '@sz/ui',
+          '@sz/audio',
+          '@sz/kernel/rng',
+          'fflate',
+          'meshoptimizer',
+          '@tweenjs/tween.js',
+          '@dimforge/rapier3d-compat',
+        ],
+      ),
+    ],
+    allowed: [
+      '@sz/kernel',
+      '@sz/weapons',
+      '@sz/sim',
+      '@sz/maps',
+      '@sz/assets',
+      'three',
+      'three/addons/utils/BufferGeometryUtils.js',
+      '@sz/render/core/pool',
+      './x',
+    ],
+    forbiddenGlobals: RENDER_GLOBALS,
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: RENDER_SYNTAX,
+  },
+  {
+    // Must come after the parent zone: it repeats every parent entry (flat config replaces arrays).
+    name: 'render/assets core (L3-pure)',
+    files: ['src/render/core/**', 'src/assets/core/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!(@sz/(kernel|weapons|sim|maps)|@sz/(render|assets)/core/[a-z-]+)$)[^.]',
+        'SD-R-1: core is three-free; it imports only kernel, weapons, core modules and sim/maps types.',
+        [
+          'three',
+          'three/addons/utils/BufferGeometryUtils.js',
+          '@sz/assets',
+          '@sz/render/gl/renderer',
+          '@sz/physics',
+          '@sz/kernel/rng',
+        ],
+      ),
+    ],
+    allowed: [
+      '@sz/kernel',
+      '@sz/weapons',
+      '@sz/sim',
+      '@sz/maps',
+      '@sz/assets/core/rig-parts',
+      './x',
+    ],
+    forbiddenGlobals: RENDER_GLOBALS,
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: [
+      ...RENDER_SYNTAX,
+      {
+        selector:
+          'TSTypeReference[typeName.name=/^(HTMLCanvasElement|HTMLElement|OffscreenCanvas|WebGL2RenderingContext|WebGLRenderingContext|Document|Window|ImageData|CanvasRenderingContext2D)$/]',
+        message: 'SD-R-1: core has no DOM or GL types.',
+      },
+    ],
+  },
+];
+
 /** @type {ReadonlyArray<Zone>} */
 export const ZONES = [
   {
@@ -681,23 +826,7 @@ export const ZONES = [
       },
     ],
   },
-  {
-    name: 'render and assets (L3)',
-    files: ['src/render/**', 'src/assets/**'],
-    forbiddenImportPatterns: [
-      RAPIER,
-      imp(
-        '^@sz/(app|ui|input|persistence|audio)(/|$)',
-        'dec-import-boundaries: render/assets must not import app or other adapters.',
-        ['@sz/ui', '@sz/app', '@sz/audio'],
-      ),
-      KERNEL_DEEP,
-    ],
-    allowed: ['@sz/kernel', 'three', '@sz/sim'],
-    forbiddenGlobals: STORAGE_GLOBALS,
-    forbiddenProperties: [],
-    forbiddenSyntax: [],
-  },
+  ...RENDER_ZONES,
   {
     name: 'ui (L3)',
     files: ['src/ui/**'],

@@ -31,8 +31,15 @@ describe('Rapier supply chain', () => {
   const lock = readJson(join(ROOT, 'package-lock.json')) as { packages: Record<string, LockEntry> };
   const entry = lock.packages[`node_modules/${NAME}`];
 
-  it('is the only runtime dependency, pinned to ~0.21.0', () => {
-    expect(pkg.dependencies).toEqual({ [NAME]: '~0.21.0' });
+  it('is pinned to ~0.21.0; the only other runtime dependency is three (presentation-3d)', () => {
+    expect(pkg.dependencies).toEqual({ [NAME]: '~0.21.0', three: '~0.187.0' });
+  });
+
+  it('resolves to 0.21.x from game/ despite the nested 0.12 copy under @types/three (SD-R-5)', () => {
+    const require = createRequire(join(ROOT, 'package.json'));
+    const root = join(dirname(require.resolve(NAME)), '..');
+    const version = (readJson(join(root, 'package.json')) as { version: string }).version;
+    expect(version).toMatch(/^0\.21\./);
   });
 
   it('lockfile pins the measured integrity, Apache-2.0, no dependencies, no install script', () => {
