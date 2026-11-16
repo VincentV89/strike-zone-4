@@ -5,7 +5,8 @@
   "description": "StrikeZone: browser 3D tactical shooter against bots. game/ (Vite) and infra/ (CDK v2) are independent npm packages; this root only chains their scripts.",
   "license": "UNLICENSED",
   "scripts": {
-    "verify": "npm --prefix game run verify && npm --prefix infra run verify && npm --prefix game run clean",
+    "verify": "npm --prefix game run scan:secrets && npm --prefix game run verify && npm --prefix infra run verify && npm --prefix game run clean",
+    "verify:evidence": "node game/scripts/run-logged.mjs game/evidence/verify.log -- npm run verify",
     "deploy": "npm --prefix infra run deploy",
     "destroy": "npm --prefix infra exec -- cdk destroy --all"
   }

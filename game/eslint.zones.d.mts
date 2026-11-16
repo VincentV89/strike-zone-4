@@ -37,3 +37,8 @@ export interface ZoneOverride {
 
 export declare const APP_OVERRIDES: ReadonlyArray<ZoneOverride>;
 export declare function overrideConfig(override: ZoneOverride): unknown;
+
+export declare const E2E_IMPORT_PATTERN: ImportPattern;
+export declare const E2E_OVERRIDE: unknown;
+export declare const E2E_SPEC_OVERRIDE: unknown;
+export declare const PLAYWRIGHT_DEFAULT_EXPORT_OVERRIDE: unknown;

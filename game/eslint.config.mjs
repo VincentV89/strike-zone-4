@@ -3,6 +3,9 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import {
   APP_OVERRIDES,
+  E2E_OVERRIDE,
+  E2E_SPEC_OVERRIDE,
+  PLAYWRIGHT_DEFAULT_EXPORT_OVERRIDE,
   SHARED_SYNTAX,
   SRC_BASE,
   ZONES,
@@ -19,7 +22,18 @@ const CONFIG_FILES = [
 ];
 
 export default tseslint.config(
-  { ignores: ['node_modules/**', 'dist/**', 'coverage/**'] },
+  {
+    ignores: [
+      'node_modules/**',
+      'dist/**',
+      'coverage/**',
+      'playwright-report/**',
+      'test-results/**',
+      'blob-report/**',
+      'e2e-results/**',
+      'evidence/**',
+    ],
+  },
   {
     // SEC-K-06: a stale eslint-disable comment fails lint.
     linterOptions: { reportUnusedDisableDirectives: 'error' },
@@ -47,6 +61,10 @@ export default tseslint.config(
   ...ZONES.map(zoneConfig),
   // SD-AS-1: generated per-file exceptions; they follow the zones so they win.
   ...APP_OVERRIDES.map(overrideConfig),
+  // SD-VS-11: e2e specs, support modules and Playwright's default-export files.
+  E2E_OVERRIDE,
+  E2E_SPEC_OVERRIDE,
+  PLAYWRIGHT_DEFAULT_EXPORT_OVERRIDE,
   {
     files: ['test/**/*.ts'],
     rules: {
@@ -61,7 +79,7 @@ export default tseslint.config(
   {
     files: CONFIG_FILES,
     languageOptions: {
-      globals: { process: 'readonly', console: 'readonly', URL: 'readonly' },
+      globals: { process: 'readonly', console: 'readonly', URL: 'readonly', Buffer: 'readonly' },
     },
   },
   {

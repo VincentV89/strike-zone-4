@@ -308,3 +308,39 @@ describe('bundle gzip gate (app-shell)', () => {
     expect(bundleGzipBytes(makeRoot({})).total).toBe(0);
   });
 });
+
+describe('check-dist secret and tooling scans (SD-VS-9, SD-VS-10)', () => {
+  const keyId = 'AKIA' + 'Q'.repeat(16);
+
+  it('fails on an access key id in a shipped JS file without printing it', () => {
+    const root = makeRoot({
+      'dist/index.html': GOOD_INDEX,
+      'dist/assets/index-abc.js': `const k="${keyId}";`,
+    });
+    const failures = checkDist(root);
+    expect(failures).toEqual([expect.stringContaining('access-key-id (SEC-VS-32)')]);
+    expect(failures.join('\n')).not.toContain(keyId);
+  });
+
+  it('fails on a private key header in a shipped CSS file', () => {
+    const pem = '-'.repeat(5) + 'BEGIN RSA PRIVATE KEY' + '-'.repeat(5);
+    const root = makeRoot({ 'dist/index.html': GOOD_INDEX, 'dist/assets/a.css': `/* ${pem} */` });
+    expect(checkDist(root)).toEqual([expect.stringContaining('private-key')]);
+  });
+
+  it.each(['@playwright/test', 'playwright-core', '@axe-core/playwright', 'axe-core'])(
+    'fails when the bundle carries the tooling marker %s',
+    (marker) => {
+      const root = makeRoot({
+        'dist/index.html': GOOD_INDEX,
+        'dist/assets/index-abc.js': `const m="${marker}";`,
+      });
+      expect(checkDist(root)).toEqual([expect.stringContaining('test tooling marker')]);
+    },
+  );
+
+  it('ignores tooling markers in non-code files such as the notice', () => {
+    const root = makeRoot({ 'dist/index.html': GOOD_INDEX, 'dist/assets/x.json': '"axe-core"' });
+    expect(checkDist(root)).toEqual([]);
+  });
+});

@@ -1388,3 +1388,109 @@ export const SRC_BASE = {
     'no-restricted-imports': ['error', { patterns: SHARED_IMPORTS.map(stripSamples) }],
   },
 };
+
+// ---- verification-suite e2e override (security-design-verification-suite SD-VS-11) ----
+//
+// Not a zone: e2e/** is outside src/, so the zone-coverage canary never sees it. Flat config
+// replaces option arrays, so SHARED_SYNTAX is repeated where default exports stay banned.
+
+/** One catch-all: Playwright, axe, four Node built-ins, @sz/* (type-only below) and relatives. */
+export const E2E_IMPORT_PATTERN = {
+  regex:
+    '^(?!(@playwright/test|@playwright/test/reporter|@axe-core/playwright|node:(fs|path|url|os)|@sz/[a-z/-]+|\\.{1,2}/.+)$).+',
+  message:
+    'SD-VS-11: e2e code reaches the game only through the hook, the DOM and URLs (no child_process, http, AWS SDK or CDK).',
+  samples: ['node:child_process', 'node:https', '@aws-sdk/client-s3', 'aws-cdk-lib', 'three'],
+};
+
+/** SD-VS-11: whole-declaration `import type` for every @sz/* package (regex form of typeOnly). */
+const E2E_SZ_TYPE_ONLY = [
+  {
+    selector: "ImportDeclaration[source.value=/^@sz\\//][importKind!='type']",
+    message: 'SD-VS-11: e2e imports @sz/* with `import type { ... }` only.',
+  },
+  {
+    selector: "ExportNamedDeclaration[source.value=/^@sz\\//][exportKind!='type']",
+    message: 'SD-VS-11: e2e re-exports @sz/* types only.',
+  },
+  {
+    selector: 'ExportAllDeclaration[source.value=/^@sz\\//]',
+    message: 'SD-VS-11: no export-all from @sz/*.',
+  },
+  {
+    selector: 'ImportExpression[source.value=/^@sz\\//]',
+    message: 'SD-VS-11: no dynamic import of @sz/*.',
+  },
+];
+
+/** SD-VS-6: specs import the guarded `test` from e2e/support/fixtures, never @playwright/test. */
+const E2E_SPEC_PLAYWRIGHT = [
+  {
+    selector: "ImportDeclaration[source.value='@playwright/test'][importKind!='type']",
+    message:
+      'SD-VS-6: specs import test and expect from ./support/fixtures (types only from @playwright/test).',
+  },
+];
+
+/** SEC-VS-13, SEC-VS-31: no CSP bypass, no insecure flags, no destroy, no stale server. */
+const E2E_CONFIG_SYNTAX = [
+  {
+    selector: 'Property[key.name=/^(bypassCSP|ignoreHTTPSErrors)$/][value.value=true]',
+    message: 'SD-VS-11: bypassCSP and ignoreHTTPSErrors hide CSP and TLS failures.',
+  },
+  {
+    selector:
+      'Literal[value=/--disable-web-security|--allow-running-insecure-content|cdk destroy|npm run destroy/]',
+    message: 'SD-VS-11: insecure browser flags and destroy commands are banned in e2e code.',
+  },
+  {
+    selector: "Property[key.name='reuseExistingServer'][value.value=true]",
+    message: 'SD-VS-11: e2e never tests a stale or foreign server already on the port.',
+  },
+  {
+    selector:
+      "AssignmentExpression > MemberExpression.left[object.object.name='process'][object.property.name='env']",
+    message: 'SD-VS-11: e2e code never writes process.env.',
+  },
+];
+
+const E2E_GLOBALS = named(
+  ['fetch', 'XMLHttpRequest', 'WebSocket', 'eval'],
+  'SD-VS-11: HTTP goes through Playwright request or the page only',
+);
+
+const e2eRules = (syntax) => ({
+  'no-restricted-imports': ['error', { patterns: [stripSamples(E2E_IMPORT_PATTERN)] }],
+  'no-restricted-globals': ['error', ...E2E_GLOBALS],
+  'no-restricted-syntax': ['error', ...syntax],
+});
+
+/** Specs and support modules under e2e/ (named exports only). */
+export const E2E_OVERRIDE = {
+  name: 'strikezone/e2e',
+  files: ['e2e/**/*.ts'],
+  rules: e2eRules([...SHARED_SYNTAX, ...E2E_SZ_TYPE_ONLY, ...E2E_CONFIG_SYNTAX]),
+};
+
+/** Spec files additionally get only the guarded test (SD-VS-6). */
+export const E2E_SPEC_OVERRIDE = {
+  name: 'strikezone/e2e-specs',
+  files: ['e2e/**/*.spec.ts'],
+  rules: e2eRules([
+    ...SHARED_SYNTAX,
+    ...E2E_SZ_TYPE_ONLY,
+    ...E2E_CONFIG_SYNTAX,
+    ...E2E_SPEC_PLAYWRIGHT,
+  ]),
+};
+
+/**
+ * Playwright requires default exports from its config, global setup and reporter. They get the
+ * same selectors and import pattern without the ExportDefaultDeclaration ban. Not added to the
+ * "tools require default export" block, which would switch no-restricted-syntax off entirely.
+ */
+export const PLAYWRIGHT_DEFAULT_EXPORT_OVERRIDE = {
+  name: 'strikezone/playwright-default-exports',
+  files: ['playwright.config.ts', 'e2e/support/global-setup.ts', 'e2e/support/reporter.ts'],
+  rules: e2eRules([...E2E_SZ_TYPE_ONLY, ...E2E_CONFIG_SYNTAX]),
+};

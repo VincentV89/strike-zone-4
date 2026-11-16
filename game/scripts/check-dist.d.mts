@@ -19,3 +19,4 @@ export declare function bundleGzipBytes(root: string): {
   readonly total: number;
   readonly files: ReadonlyArray<{ readonly name: string; readonly gzip: number }>;
 };
+export declare const TOOLING_MARKERS: RegExp;

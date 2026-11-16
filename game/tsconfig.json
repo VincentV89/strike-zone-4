@@ -21,6 +21,13 @@
       "@sz/*": ["src/*"]
     }
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "vite.config.ts", "vitest.config.mts"],
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "e2e/**/*.ts",
+    "playwright.config.ts",
+    "vite.config.ts",
+    "vitest.config.mts"
+  ],
   "exclude": ["node_modules", "dist", "coverage"]
 }
