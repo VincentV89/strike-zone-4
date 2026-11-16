@@ -7,8 +7,6 @@
 // `samples` and `allowed` are test data for test/lint/zones.test.ts and are stripped by
 // the mapper. Loosening or removing any entry needs a decision record (SEC-K-06).
 
-const ADAPTERS = 'physics|input|render|assets|audio|ui|persistence|diagnostics';
-
 /** Shared by every file in src/: no parent-relative imports, so paths cannot bypass a zone. */
 export const SHARED_IMPORTS = [
   {
@@ -36,19 +34,6 @@ const KERNEL_DEEP = imp('^@sz/kernel/', 'BR-K-05: import the kernel only through
   '@sz/kernel/rng',
 ]);
 const APP = imp('^@sz/app(/|$)', 'dec-import-boundaries: nothing imports app-shell.', ['@sz/app']);
-const ALL_ADAPTERS = imp(
-  `^@sz/(${ADAPTERS})(/|$)`,
-  'dec-import-boundaries: domain and application layers must not import adapters.',
-  ['@sz/physics', '@sz/render/scene', '@sz/ui', '@sz/persistence'],
-);
-const SIM_ROUND_APP = imp(
-  '^@sz/(sim|round|app)(/|$)',
-  'dec-import-boundaries: L1 domain must not import simulation, round or app.',
-  ['@sz/sim', '@sz/round/controller', '@sz/app'],
-);
-
-const L1_IMPORTS = [THREE, RAPIER, SIM_ROUND_APP, ALL_ADAPTERS, KERNEL_DEEP];
-
 const BROWSER_GLOBALS = [
   'window',
   'document',
@@ -407,6 +392,98 @@ const AI_NO_BUS = {
   message: 'SD-AI-7: bot-ai is off the bus; match-loop emits BotStateChanged from transitions.',
 };
 
+// ---- match-loop zones (security-design-match-loop SD-ML-1) ----
+
+/** sim, round and stats: no I/O, timers, global escapes, eval, Reflect or WebAssembly (SEC-ML-40). */
+const ML_GLOBALS = [
+  ...PURE_GLOBALS,
+  ...named(
+    [...NO_IO_GLOBAL_NAMES, 'eval', 'Reflect', 'WebAssembly'],
+    'SEC-ML-40: match-loop has no I/O, timers or global escapes; use Number.isFinite',
+  ),
+];
+
+/** Each zone has one catch-all import pattern, so every forbidden import reports exactly once. */
+const MATCH_LOOP_ZONES = [
+  {
+    // @sz/physics and @sz/maps pass the pattern; typeOnly() rejects any value use (R-ML-7).
+    name: 'simulation (L2)',
+    files: ['src/sim/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!(@sz/(kernel|player|weapons|combat|ai|nav|physics|maps)|@sz/ai/perception)$)[^.]',
+        'SD-ML-1: sim imports only kernel, player, weapons, combat, ai, ai/perception, nav, and physics/maps types.',
+        [
+          'three',
+          '@dimforge/rapier3d-compat',
+          '@sz/round',
+          '@sz/app',
+          '@sz/render',
+          '@sz/persistence',
+          '@sz/ui',
+          '@sz/kernel/rng',
+          '@sz/ai/brain',
+          '@sz/stats',
+        ],
+      ),
+    ],
+    allowed: [
+      '@sz/kernel',
+      '@sz/player',
+      '@sz/weapons',
+      '@sz/combat',
+      '@sz/ai',
+      '@sz/ai/perception',
+      '@sz/nav',
+      '@sz/physics',
+      '@sz/maps',
+      './step',
+    ],
+    forbiddenGlobals: ML_GLOBALS,
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: [
+      ...NO_DYNAMIC_IMPORT,
+      ...typeOnly('@sz/physics'),
+      ...typeOnly('@sz/maps'),
+      AI_NO_BUS,
+    ],
+  },
+  {
+    // round never sees bot-ai or physics: seeds and the spawn sight check come from @sz/sim.
+    name: 'round (L2)',
+    files: ['src/round/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!@sz/(kernel|sim|stats|maps)$)[^.]',
+        'SD-ML-1: round imports only kernel, sim, stats and maps.',
+        ['@sz/ai', '@sz/physics', '@sz/player', '@sz/combat', '@sz/sim/step', '@sz/app', 'three'],
+      ),
+    ],
+    allowed: ['@sz/kernel', '@sz/sim', '@sz/stats', '@sz/maps', './config'],
+    forbiddenGlobals: ML_GLOBALS,
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: [...NO_DYNAMIC_IMPORT, AI_NO_BUS],
+  },
+  {
+    // SEC-ML-43: stats leaves the old domain (L1) zone, which is deleted.
+    name: 'stats (L1)',
+    files: ['src/stats/**'],
+    forbiddenImportPatterns: [
+      imp('^(?!@sz/kernel$)[^.]', 'SD-ML-1: stats imports only @sz/kernel.', [
+        '@sz/nav',
+        '@sz/sim',
+        '@sz/weapons',
+        '@sz/kernel/rng',
+        'three',
+      ]),
+    ],
+    allowed: ['@sz/kernel', './saturate'],
+    forbiddenGlobals: ML_GLOBALS,
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: [...NO_DYNAMIC_IMPORT, AI_NO_BUS],
+  },
+];
+
 /** @type {ReadonlyArray<Zone>} */
 export const ZONES = [
   {
@@ -432,17 +509,8 @@ export const ZONES = [
     ],
   },
   {
-    name: 'domain (L1)',
-    files: ['src/stats/**'],
-    forbiddenImportPatterns: L1_IMPORTS,
-    allowed: ['@sz/kernel', '@sz/nav'],
-    forbiddenGlobals: PURE_GLOBALS,
-    forbiddenProperties: PURE_PROPERTIES,
-    forbiddenSyntax: [],
-  },
-  {
     // ADR-WC-7: own zone, not in domain (L1), so no file matches two zones. One pattern bans
-    // every non-relative import except @sz/kernel; it subsumes L1_IMPORTS (which would
+    // every non-relative import except @sz/kernel; it subsumes the old shared L1 list (which would
     // otherwise report a second time for the same import).
     name: 'weapons (L1)',
     files: ['src/weapons/**'],
@@ -544,33 +612,7 @@ export const ZONES = [
     forbiddenProperties: PURE_PROPERTIES,
     forbiddenSyntax: [...NO_DYNAMIC_IMPORT, ...typeOnly('@sz/maps'), AI_PORT_ESCAPES, AI_NO_BUS],
   },
-  {
-    name: 'simulation (L2)',
-    files: ['src/sim/**'],
-    forbiddenImportPatterns: [
-      THREE,
-      RAPIER,
-      imp('^@sz/(round|app)(/|$)', 'dec-import-boundaries: sim must not import round or app.', [
-        '@sz/round',
-        '@sz/app',
-      ]),
-      ALL_ADAPTERS,
-      KERNEL_DEEP,
-    ],
-    allowed: ['@sz/kernel', '@sz/player', '@sz/ai'],
-    forbiddenGlobals: PURE_GLOBALS,
-    forbiddenProperties: PURE_PROPERTIES,
-    forbiddenSyntax: [],
-  },
-  {
-    name: 'round (L2)',
-    files: ['src/round/**'],
-    forbiddenImportPatterns: [THREE, RAPIER, APP, ALL_ADAPTERS, KERNEL_DEEP],
-    allowed: ['@sz/kernel', '@sz/sim'],
-    forbiddenGlobals: PURE_GLOBALS,
-    forbiddenProperties: PURE_PROPERTIES,
-    forbiddenSyntax: [],
-  },
+  ...MATCH_LOOP_ZONES,
   {
     name: 'maps (L1)',
     files: ['src/maps/**'],

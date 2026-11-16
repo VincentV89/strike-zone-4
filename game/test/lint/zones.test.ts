@@ -531,3 +531,92 @@ describe('bot-ai and perception zones (hand-pinned)', () => {
     expect(await ruleHits(value, percept, 'no-restricted-syntax')).toBe(1);
   });
 });
+
+// Hand-pinned match-loop canaries (security-design-match-loop SD-ML-1).
+describe('match-loop zones (hand-pinned)', () => {
+  const sim = 'src/sim/step.ts';
+  const round = 'src/round/controller.ts';
+  const stats = 'src/stats/summary.ts';
+  const all = [sim, round, stats];
+
+  it.each([
+    "import { createPhysicsHost } from '@sz/physics';\nexport const h = createPhysicsHost;\n",
+    "import { desertCompound } from '@sz/maps';\nexport const m = desertCompound;\n",
+    "export { DEFAULT_CHARACTER } from '@sz/physics';\n",
+    "export * from '@sz/maps';\n",
+  ])('sim may use @sz/physics and @sz/maps as types only: %s', async (code) => {
+    expect(await ruleHits(code, sim, 'no-restricted-syntax')).toBeGreaterThanOrEqual(1);
+  });
+
+  it('sim allows type imports of @sz/physics and @sz/maps and value imports of the domain', async () => {
+    const code = [
+      "import type { CharacterSpec } from '@sz/physics';",
+      "import type { MapDefinition } from '@sz/maps';",
+      "import { createBrain } from '@sz/ai';",
+      "import { createPerceptionSystem } from '@sz/ai/perception';",
+      "import { resolveShot } from '@sz/combat';",
+      "import { createPathBudget } from '@sz/nav';",
+      'export type A = CharacterSpec | MapDefinition;',
+      'export const f = [createBrain, createPerceptionSystem, resolveShot, createPathBudget];',
+    ].join('\n');
+    expect(await ruleHits(code, sim, 'no-restricted-syntax')).toBe(0);
+    expect(await ruleHits(code, sim, 'no-restricted-imports')).toBe(0);
+  });
+
+  it('round never imports bot-ai, physics, player or combat, even as types', async () => {
+    for (const spec of ['@sz/ai', '@sz/physics', '@sz/player', '@sz/combat', '@sz/ai/perception']) {
+      const code = `import type { X } from '${spec}';\nexport type Y = X;\n`;
+      expect(await ruleHits(code, round, 'no-restricted-imports'), spec).toBe(1);
+    }
+    expect(await ruleHits(importOf('@sz/maps'), round, 'no-restricted-imports')).toBe(0);
+  });
+
+  it('stats imports only the kernel', async () => {
+    expect(await ruleHits(importOf('@sz/kernel'), stats, 'no-restricted-imports')).toBe(0);
+    expect(await ruleHits(importOf('@sz/sim'), stats, 'no-restricted-imports')).toBe(1);
+  });
+
+  it.each(all)(
+    '%s bans console, timers, globalThis, WebAssembly, Reflect, eval and isFinite',
+    async (file) => {
+      for (const code of [
+        "console.error('x');\n",
+        'export const t = setTimeout(() => 0, 1);\n',
+        'export const h = globalThis.__strikezone;\n',
+        'export const w = WebAssembly;\n',
+        "export const r = Reflect.get({}, 'a');\n",
+        'export const e = eval;\n',
+        'export const n = isFinite(1);\n',
+        'export const d = Date.now();\n',
+      ]) {
+        expect(await ruleHits(code, file, 'no-restricted-globals'), code).toBe(1);
+      }
+      expect(
+        await ruleHits('export const r = Math.random();\n', file, 'no-restricted-properties'),
+      ).toBe(1);
+    },
+  );
+
+  it.each(all)('%s bans dynamic import and creating a bus or clock', async (file) => {
+    expect(
+      await ruleHits("export const m = import('@sz/kernel');\n", file, 'no-restricted-syntax'),
+    ).toBeGreaterThanOrEqual(1);
+    const code = "import { createEventBus } from '@sz/kernel';\nexport const b = createEventBus;\n";
+    expect(await ruleHits(code, file, 'no-restricted-syntax')).toBe(1);
+  });
+
+  it('bot-ai still cannot import sim, round or stats', async () => {
+    for (const spec of ['@sz/sim', '@sz/round', '@sz/stats']) {
+      expect(await ruleHits(importOf(spec), 'src/ai/brain.ts', 'no-restricted-imports'), spec).toBe(
+        1,
+      );
+    }
+  });
+
+  it('the old domain (L1) zone is gone and stats has its own zone', () => {
+    expect(ZONES.some((z) => z.name === 'domain (L1)')).toBe(false);
+    expect(ZONES.filter((z) => z.files.includes('src/stats/**')).map((z) => z.name)).toEqual([
+      'stats (L1)',
+    ]);
+  });
+});
