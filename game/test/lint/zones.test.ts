@@ -450,3 +450,84 @@ describe('zone coverage (ADR-WC-7)', () => {
     expect(zonesFor('src/combat/x.ts')).toEqual(['combat (L1)']);
   });
 });
+
+// Hand-pinned bot-ai canaries (security-design-bot-ai SD-AI-1, SD-AI-2, SD-AI-4, SD-AI-7).
+describe('bot-ai and perception zones (hand-pinned)', () => {
+  const brain = 'src/ai/brain.ts';
+  const percept = 'src/ai/perception/sense.ts';
+  const both = [brain, percept];
+
+  it.each(both)('%s bans globalThis, console, timers, fetch, Reflect and eval', async (file) => {
+    for (const code of [
+      'export const h = globalThis.__strikezone;\n',
+      "console.log('x');\n",
+      'export const t = setTimeout(() => 0, 1);\n',
+      "export const f = fetch('x');\n",
+      "export const r = Reflect.get({}, 'a');\n",
+      'export const e = eval;\n',
+      'export const n = isFinite(1);\n',
+    ]) {
+      expect(await ruleHits(code, file, 'no-restricted-globals'), code).toBe(1);
+    }
+    expect(
+      await ruleHits('export const r = Math.random();\n', file, 'no-restricted-properties'),
+    ).toBe(1);
+  });
+
+  it.each(both)('%s bans dynamic import, even of an allowed module', async (file) => {
+    expect(
+      await ruleHits("export const m = import('@sz/kernel');\n", file, 'no-restricted-syntax'),
+    ).toBe(1);
+    expect(
+      await ruleHits("export const m = import('@sz/player');\n", file, 'no-restricted-syntax'),
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it.each(both)(
+    '%s cannot reach raycast, resetTick or clearReservations (SD-AI-4)',
+    async (file) => {
+      for (const member of ['raycast', 'resetTick', 'clearReservations']) {
+        const code = `export const f = (q: { ${member}: () => void }) => { q.${member}(); };\n`;
+        expect(await ruleHits(code, file, 'no-restricted-syntax'), member).toBe(1);
+      }
+      const ok = 'export const f = (q: { lineOfSight: () => boolean }) => q.lineOfSight();\n';
+      expect(await ruleHits(ok, file, 'no-restricted-syntax')).toBe(0);
+    },
+  );
+
+  it.each(both)('%s cannot create an event bus or a clock (SD-AI-7)', async (file) => {
+    for (const name of ['createEventBus', 'createFixedClock']) {
+      const code = `import { ${name} } from '@sz/kernel';\nexport const b = ${name};\n`;
+      expect(await ruleHits(code, file, 'no-restricted-syntax'), name).toBe(1);
+    }
+    const types = "import type { DomainEvent } from '@sz/kernel';\nexport type E = DomainEvent;\n";
+    expect(await ruleHits(types, file, 'no-restricted-syntax')).toBe(0);
+  });
+
+  it('bot-ai may import @sz/maps types only (SD-AI-2)', async () => {
+    const value = "import { desertCompound } from '@sz/maps';\nexport const m = desertCompound;\n";
+    const type = "import type { CoverPoint } from '@sz/maps';\nexport type C = CoverPoint;\n";
+    expect(await ruleHits(value, brain, 'no-restricted-syntax')).toBe(1);
+    expect(await ruleHits(type, brain, 'no-restricted-syntax')).toBe(0);
+    expect(await ruleHits(type, brain, 'no-restricted-imports')).toBe(0);
+    expect(
+      await ruleHits(importOf('@sz/maps/desert-compound'), brain, 'no-restricted-imports'),
+    ).toBe(1);
+  });
+
+  it('bot-ai imports perception only through its entry module; perception cannot import nav', async () => {
+    expect(await ruleHits(importOf('@sz/ai/perception'), brain, 'no-restricted-imports')).toBe(0);
+    expect(
+      await ruleHits(importOf('@sz/ai/perception/sense'), brain, 'no-restricted-imports'),
+    ).toBe(1);
+    expect(await ruleHits(importOf('@sz/nav'), percept, 'no-restricted-imports')).toBe(1);
+    expect(
+      await ruleHits(importOf('@sz/ai/perception/types'), percept, 'no-restricted-imports'),
+    ).toBe(0);
+  });
+
+  it('perception may import @sz/player as types only', async () => {
+    const value = "import { stepMovement } from '@sz/player';\nexport const s = stepMovement;\n";
+    expect(await ruleHits(value, percept, 'no-restricted-syntax')).toBe(1);
+  });
+});

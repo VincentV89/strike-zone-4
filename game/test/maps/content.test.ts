@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { vec3 } from '@sz/kernel';
 import { box, collidersToRadarSegments, solidTop } from '@sz/maps';
+import { denyHits } from '../support/deny-list';
 import { fixtureMap } from './fixture-map';
 import { SHIPPED_MAPS } from './shipped-maps';
 
@@ -31,27 +32,7 @@ describe('collidersToRadarSegments', () => {
   });
 });
 
-// Names and callouts from commercial games must not appear (SEC-WM-12).
-const DENY = [
-  'dust',
-  'mirage',
-  'inferno',
-  'nuke',
-  'overpass',
-  'vertigo',
-  'ancient',
-  'anubis',
-  'longa',
-  'shorta',
-  'bsite',
-  'asite',
-  'catwalk',
-  'ctspawn',
-  'tspawn',
-  'banana',
-  'middoors',
-  'tunnels',
-];
+// Names and callouts from commercial games must not appear (SEC-WM-12); see deny-list.ts.
 const ASSET_REFS = ['://', '.png', '.jpg', '.glb', '.gltf', '.wav', '.mp3'];
 
 function strings(value: unknown, out: string[] = []): string[] {
@@ -66,10 +47,7 @@ describe.each(SHIPPED_MAPS.map((m) => [m.id, m] as const))('content of %s', (_id
   const all = strings(map);
 
   it('SEC-WM-12: uses no names or callouts from the deny-list', () => {
-    const offenders = all.filter((s) => {
-      const flat = s.toLowerCase().replace(/[-_\s]/g, '');
-      return DENY.some((d) => flat.includes(d));
-    });
+    const offenders = all.filter((s) => denyHits(s).length > 0);
     expect(offenders).toEqual([]);
   });
 
