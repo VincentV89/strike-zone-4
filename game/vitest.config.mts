@@ -12,7 +12,14 @@ export default defineConfig({
     testTimeout: 60_000,
     coverage: {
       provider: 'v8',
-      include: ['src/**/*.ts'],
+      include: [
+        'src/**/*.ts',
+        // verification-suite (SD-VS-6, ADR-VS-2): evidence scripts and the pure request policy.
+        'scripts/e2e-summary.mjs',
+        'scripts/scan-secrets.mjs',
+        'scripts/run-logged.mjs',
+        'e2e/support/policy.ts',
+      ],
       // BR-K-57: the 80% floor applies to framework-free logic only. Every entry needs a reason.
       exclude: [
         // app-shell (FD-AS-4): only the DOM glue and the entry are excluded; core/ stays counted.
@@ -59,6 +66,11 @@ export default defineConfig({
         // app-shell (NFR-AS coverage): screen machine, boot plan, frame planner, probe, advisory.
         'src/app/core/**': { lines: 90, branches: 85 },
         'src/diagnostics/core/**': { lines: 90, branches: 85 },
+        // verification-suite: the summariser and scanner decide what the report may claim.
+        'scripts/e2e-summary.mjs': { lines: 90, branches: 85 },
+        'scripts/scan-secrets.mjs': { lines: 90, branches: 85 },
+        'scripts/run-logged.mjs': { lines: 90, branches: 85 },
+        'e2e/support/policy.ts': { lines: 90, branches: 85 },
       },
     },
   },

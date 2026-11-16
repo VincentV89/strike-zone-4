@@ -4,6 +4,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
+import { findSecrets } from './scan-secrets.mjs';
 
 const TEXT_EXTENSIONS = /\.(html|js|mjs|css|json|svg|txt|map)$/i;
 
@@ -38,6 +39,13 @@ export const WEBGPU_MARKER = /\bWebGPURenderer\b/;
 export function stripAllowedUrlContext(text) {
   return text.replace(/\/\*![\s\S]*?\*\//g, '').replace(/^\s*\/\/# sourceMappingURL=.*$/gm, '');
 }
+
+/**
+ * SEC-VS-41 (SD-VS-9): test tooling must never reach the shipped bundle. Checked in .js, .mjs
+ * and .html files.
+ */
+export const TOOLING_MARKERS = /@playwright\/test|playwright-core|@axe-core|axe-core/i;
+const TOOLING_FILE = /\.(m?js|html)$/i;
 
 /** SEC-K-13: inline <script> without src, or any inline on* event handler attribute. */
 export function findIndexHtmlProblems(html) {
@@ -179,6 +187,13 @@ export function checkDist(root) {
         if (JS_FILE.test(file) && XML_NAMESPACE_URLS.has(url)) continue;
         if (isCode && CODE_ALLOWED_URLS.has(url)) continue;
         failures.push(`${rel}: external URL ${url}`);
+      }
+      // SEC-VS-32: no credential or key material in any shipped text file.
+      for (const hit of findSecrets(text)) {
+        failures.push(`${rel}:${hit.line}: ${hit.kind} (SEC-VS-32)`);
+      }
+      if (TOOLING_FILE.test(file) && TOOLING_MARKERS.test(text)) {
+        failures.push(`${rel}: test tooling marker in bundle (SEC-VS-41)`);
       }
       if (isCode) {
         for (const hit of findDynamicCode(text)) failures.push(`${rel}: ${hit} (SEC-R-10)`);

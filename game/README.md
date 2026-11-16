@@ -6,16 +6,20 @@ Vite + TypeScript package for the browser game. It holds the **kernel** (`src/ke
 
 Run from `game/` (or with `npm --prefix game run <script>` from the repository root).
 
-| Command              | What it does                                                                                   |
-| -------------------- | ---------------------------------------------------------------------------------------------- |
-| `npm ci`             | Install pinned dependencies. The only runtime dependency is `@dimforge/rapier3d-compat`.       |
-| `npm run verify`     | Release gate: lint, typecheck, tests with coverage, build, dist check, clean, advisory audit.  |
-| `npm run lint`       | ESLint with `--max-warnings 0` (includes the import zones) and the Prettier check.             |
-| `npm test`           | Vitest with v8 coverage. Kernel, weapons, combat: 95% lines, 90% branches. Global: 80% lines.  |
-| `npm run build`      | `vite build` into `dist/` (`index.html` at the root, hashed files under `dist/assets/`).       |
-| `npm run check:dist` | Fails on inline scripts or `on*` handlers, external URLs in `dist/`, or a non-empty `public/`. |
-| `npm run bench`      | Advisory kernel micro-benchmarks. Not part of verify.                                          |
-| `npm run clean`      | Removes `dist/` and `coverage/`.                                                               |
+| Command                  | What it does                                                                                                                                                            |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm ci`                 | Install pinned dependencies. The only runtime dependency is `@dimforge/rapier3d-compat`.                                                                                |
+| `npm run verify`         | Release gate: lint, typecheck, tests with coverage, build, dist check, clean, advisory audit.                                                                           |
+| `npm run lint`           | ESLint with `--max-warnings 0` (includes the import zones) and the Prettier check.                                                                                      |
+| `npm test`               | Vitest with v8 coverage. Kernel, weapons, combat: 95% lines, 90% branches. Global: 80% lines.                                                                           |
+| `npm run build`          | `vite build` into `dist/` (`index.html` at the root, hashed files under `dist/assets/`).                                                                                |
+| `npm run check:dist`     | Fails on inline scripts or `on*` handlers, external URLs in `dist/`, or a non-empty `public/`.                                                                          |
+| `npm run bench`          | Advisory kernel micro-benchmarks. Not part of verify.                                                                                                                   |
+| `npm run clean`          | Removes build outputs: `dist/`, `coverage/`, `playwright-report/`, `test-results/`, `blob-report/`.                                                                     |
+| `npm run scan:secrets`   | Secret scan of the repository tree (first step of the root verify).                                                                                                     |
+| `npm run e2e`            | Build, then Playwright against `vite preview` on 127.0.0.1:4173; writes `e2e-results/results.{json,md}`. Exit 0 pass, 1 fail, 2 flaky only, 3 browser could not launch. |
+| `npm run e2e:deployed`   | Playwright against `E2E_BASE_URL` or `SiteUrl` from `infra/cdk-outputs.json`; writes `results-deployed.*`.                                                              |
+| `npm run clean:evidence` | Removes `e2e-results/` and `evidence/` once the final report is written.                                                                                                |
 
 The root `npm run verify` runs game verify, then infra verify (whose `cdk synth` rebuilds `game/dist`), then `game clean`.
 
@@ -124,3 +128,11 @@ devicePixelRatio, onContextLost, onContextRestored })` → run `assets.loadSteps
 
 - Never put files in `public/`: Vite copies them unhashed and hosting caches them for a year.
 - Add coverage exclusions only with a reason comment in `vitest.config.mts`.
+
+## Verification suite (`e2e/`, `scripts/`)
+
+- `e2e/support/checks.ts` is the frozen check catalogue. `scripts/e2e-summary.mjs` builds the results from it, so a check that did not run is `not-run`, a skip without a `manual-only:` label is `failed`, and a row that used the `?e2e` hook is labelled `injected`. Only the summariser writes statuses.
+- Every spec imports `test` from `e2e/support/fixtures.ts`. Its auto guard fails a test on any console error, page error, cross-origin request or non-empty `__strikezone.errors()`.
+- `e2e/**` may import `@sz/*` only with `import type` (lint override in `eslint.zones.mjs`).
+- `test/evidence/bot-states.test.ts` runs inside verify and writes `evidence/bot-states.json`.
+- `test/bench/sim-tick.bench.ts` (in `npm run bench`) measures sim tick CPU time, not FPS.
