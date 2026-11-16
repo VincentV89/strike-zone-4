@@ -106,6 +106,14 @@ const FLOOR_MIDDLE = [
 ];
 const AISLE_W = chain('aisle-w', at(-20, 22), at(-20, -22), 7.5);
 const AISLE_E = chain('aisle-e', at(21, 22), at(21, -22), 7.5);
+/**
+ * Gaps between the pallet racks (x ±15, z 0 and ±19). The aisle nodes are 12.5 m from the
+ * main-floor lanes, past the 9 m auto-link radius, so without these nodes bots would path
+ * round through the bays to reach an aisle.
+ */
+const RACK_GAPS = [-15, 15].flatMap((x) =>
+  [19, 0, -19].map((z, i) => node(`rack-gap-${x < 0 ? 'w' : 'e'}-${String(i)}`, at(x, z))),
+);
 
 // ---- cover points (BR-WH-23: exactly 34) ----
 type Side = 'n' | 's' | 'e' | 'w';
@@ -179,6 +187,7 @@ export const WAREHOUSE_NAV_NODES: ReadonlyArray<NavNodeDef> = withPatrolTags([
   ...FLOOR_MIDDLE,
   ...AISLE_W,
   ...AISLE_E,
+  ...RACK_GAPS,
   ...COVER_NODES,
 ]);
 

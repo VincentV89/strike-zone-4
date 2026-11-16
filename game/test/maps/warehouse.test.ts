@@ -1,15 +1,7 @@
 // Checks that apply only to the Industrial Warehouse (business-rules-warehouse-map). The
 // shared static, content and Rapier suites also run on it through SHIPPED_MAPS (BR-WH-50).
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import {
-  MASK_WORLD,
-  PLAYER_ID,
-  createRng,
-  degToRad,
-  vec3,
-  type BotCount,
-  type Vec3,
-} from '@sz/kernel';
+import { MASK_WORLD, PLAYER_ID, createRng, degToRad, vec3, type Vec3 } from '@sz/kernel';
 import {
   createMapCatalog,
   desertCompound,
@@ -30,12 +22,15 @@ import { RAPIER_SKIP_REASON, rapierAvailable } from '../support/rapier-probe';
 
 // Pinned from the first green run against the box-world query (BR-WH-27, SD-WH-6). Any
 // change to the warehouse data changes these on purpose.
-const WAREHOUSE_NODE_COUNT = 176;
-const WAREHOUSE_LINK_COUNT = 0;
-const WAREHOUSE_DIGEST = '00000000';
+const WAREHOUSE_NODE_COUNT = 182;
+const WAREHOUSE_LINK_COUNT = 456;
+const WAREHOUSE_DIGEST = 'ac562957';
 
 const DT = 1 / 60;
 const EYE = 1.62;
+/** SEC-WH-06 bounds: highest foot height in the air, and the highest surface to stand on. */
+const ESCAPE_CEILING = 6.5;
+const MAX_STANDING_HEIGHT = 5.2;
 const byId = (id: string): Solid => {
   const s = map.solids.find((x) => x.id === id);
   if (!s) throw new Error(`no solid ${id}`);
@@ -47,8 +42,8 @@ const spanX = (s: Solid): readonly [number, number] => [
   s.center.x + s.half.x,
 ];
 
-function boxGraph(): NavGraph {
-  const built = buildNavGraph(map, createBoxWorldQuery(map));
+function boxGraph(q = createBoxWorldQuery(map)): NavGraph {
+  const built = buildNavGraph(map, q);
   if (!built.ok) throw new Error(JSON.stringify(built.error));
   return built.value;
 }
@@ -72,7 +67,7 @@ describe('Industrial Warehouse data', () => {
     expect(map.solids.length).toBe(56);
     expect(map.solids.length).toBeLessThanOrEqual(80);
     expect(map.solids.filter((s) => s.castShadow).length).toBeLessThanOrEqual(60);
-    expect(map.navNodes.length).toBe(176);
+    expect(map.navNodes.length).toBe(182);
     expect(map.navNodes.length).toBeLessThanOrEqual(250);
   });
 
@@ -223,11 +218,30 @@ describe('Industrial Warehouse data', () => {
   });
 
   it('BR-WH-27: node count, link count and adjacency digest are pinned literals', () => {
-    const g = boxGraph();
+    const q = createBoxWorldQuery(map);
+    const g = boxGraph(q);
     const edges = edgeList(g);
+    expect(q.calls.raycast + q.calls.lineOfSight).toBeLessThanOrEqual(10_000); // NFR-WH-P1
     expect(g.nodeCount).toBe(WAREHOUSE_NODE_COUNT);
     expect(edges.length).toBe(WAREHOUSE_LINK_COUNT);
     expect(fnv1aString(edges.join('\n'))).toBe(WAREHOUSE_DIGEST);
+  });
+
+  it('rack-gap nodes link each side aisle straight to the main floor (human decision 2026-11-16)', () => {
+    const g = boxGraph();
+    const gaps = map.navNodes.filter((n) => n.id.startsWith('rack-gap-'));
+    expect(gaps).toHaveLength(6);
+    for (const n of gaps) {
+      const near = g.edges(g.nodeByName(n.id)!).map((e) => g.node(e.to).id);
+      expect(
+        near.some((id) => id.startsWith('aisle-')),
+        n.id,
+      ).toBe(true);
+      expect(
+        near.some((id) => /^(main|floor-east)-/.test(id)),
+        n.id,
+      ).toBe(true);
+    }
   });
 
   it('BR-WH-30: 6 player spawns in south-bay and 12 bot spawns in each north bay', () => {
@@ -246,7 +260,7 @@ describe('Industrial Warehouse data', () => {
     const q = createBoxWorldQuery(map);
     const los = (a: Vec3, b: Vec3) => q.lineOfSight(a, b);
     for (const n of [1, 2, 3, 5, 8, 10, 15, 20] as const) {
-      const plan = selectSpawns(map, n as BotCount, createRng(33), los);
+      const plan = selectSpawns(map, n, createRng(33), los);
       expect(plan.ok, String(n)).toBe(true);
       if (plan.ok) expect(plan.value.bots).toHaveLength(n);
     }
@@ -338,7 +352,13 @@ describe.skipIf(!rapierAvailable)(`Industrial Warehouse on Rapier${RAPIER_SKIP_R
   });
 
   it('BR-WH-17: a sideways walk from every deck node stays on the deck', () => {
-    for (const n of map.navNodes.filter((x) => x.tags.includes('elevated'))) {
+    // gantry-3 and gantry-7 sit where the deck meets the ramp tops; a ramp's sides are open
+    // by design, so stepping off one is not walking off the deck.
+    const deckNodes = map.navNodes.filter(
+      (x) => x.tags.includes('elevated') && Math.abs(x.pos.z) < 13,
+    );
+    expect(deckNodes.map((x) => x.id)).toEqual(['gantry-4', 'gantry-5', 'gantry-6']);
+    for (const n of deckNodes) {
       for (const dx of [-1, 1]) {
         expect(
           slide(world, n.pos, vec3(dx, 0, 0), 2),
@@ -376,11 +396,17 @@ describe.skipIf(!rapierAvailable)(`Industrial Warehouse on Rapier${RAPIER_SKIP_R
     }
   });
 
-  it('SEC-WH-06: sprint-jumping in 8 directions never leaves the hall or climbs above 6 m', () => {
+  // The character controller's 0.4 m autostep plus the 1.0 m jump apex lets a player climb a
+  // ledge of up to about 1.4 m, which includes the 1.1 m gantry parapet (top 5.1 m). From there
+  // a jump peaks near 6.05 m. That is still 6 m below the 12 m boundary, and the 6 m storage-e
+  // roof is 3.8 m away across the deck. So the ceiling is 6.5 m in the air, and the highest
+  // grounded foot height is the parapet top (human decision, 2026-11-16).
+  it('SEC-WH-06: sprint-jumping in 8 directions never leaves the hall or climbs too high', () => {
     const starts = escapeStartNodes();
     expect(starts.length).toBeGreaterThanOrEqual(20);
     expect(starts.length).toBeLessThanOrEqual(100);
     const failures: string[] = [];
+    let highestGrounded = -Infinity;
     const intent = {
       move: { forward: 1, right: 0 },
       sprint: true,
@@ -393,15 +419,16 @@ describe.skipIf(!rapierAvailable)(`Industrial Warehouse on Rapier${RAPIER_SKIP_R
         const motion = createPlayerMotion(pose);
         expect(placePlayer(motion, world, pose)).toBe(true);
         for (let t = 0; t < 120; t++) {
-          stepMovement(motion, intent, world, DT, { move: true });
+          const out = stepMovement(motion, intent, world, DT, { move: true });
           world.step(DT);
           const p = world.positionOf(PLAYER_ID)!;
+          if (out.grounded) highestGrounded = Math.max(highestGrounded, p.y);
           const ok =
             Number.isFinite(p.x + p.y + p.z) &&
             Math.abs(p.x) <= 40 &&
             Math.abs(p.z) <= 40 &&
             p.y >= -0.5 &&
-            p.y <= 6;
+            p.y <= ESCAPE_CEILING;
           if (!ok) {
             failures.push(`${n.id} yaw ${String(k)} tick ${String(t)} at ${JSON.stringify(p)}`);
             break;
@@ -410,5 +437,6 @@ describe.skipIf(!rapierAvailable)(`Industrial Warehouse on Rapier${RAPIER_SKIP_R
       }
     }
     expect(failures).toEqual([]);
+    expect(highestGrounded).toBeLessThanOrEqual(MAX_STANDING_HEIGHT);
   }, 60_000);
 });
