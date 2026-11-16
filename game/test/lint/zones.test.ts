@@ -620,3 +620,164 @@ describe('match-loop zones (hand-pinned)', () => {
     ]);
   });
 });
+
+// Hand-pinned ui-hud canaries (security-design-ui-hud SD-UI-1 to SD-UI-6).
+describe('ui and persistence zones (hand-pinned)', () => {
+  const dom = 'src/ui/dom/x.ts';
+  const core = 'src/ui/core/x.ts';
+  const store = 'src/persistence/x.ts';
+
+  it.each(['src/ui/dom/mount.ts', 'src/ui/core/effects.ts', 'src/persistence/store.ts'])(
+    '%s is matched by exactly one zone',
+    (file) => {
+      const matched = ZONES.filter(
+        (z) =>
+          z.files.some((g) => file.startsWith(g.replace('**', ''))) &&
+          !(z.ignores ?? []).some((g) => file.startsWith(g.replace('**', ''))),
+      );
+      expect(matched).toHaveLength(1);
+    },
+  );
+
+  it.each([dom, core])('%s bans HTML sinks and layout reads', async (file) => {
+    for (const code of [
+      'declare const el: any;\nel.innerHTML = "x";\n',
+      'declare const el: any;\nel.outerHTML = "x";\n',
+      'declare const el: any;\nel.insertAdjacentHTML("beforeend", "x");\n',
+      'document.write("x");\n',
+      'declare const el: any;\nexport const w = el.offsetWidth;\n',
+      'declare const el: any;\nexport const r = el.getBoundingClientRect();\n',
+    ]) {
+      expect(await ruleHits(code, file, 'no-restricted-properties'), code).toBe(1);
+    }
+    const ok = 'declare const el: any;\nel.textContent = "x";\n';
+    expect(await ruleHits(ok, file, 'no-restricted-properties')).toBe(0);
+  });
+
+  it.each([
+    'document.createElement(tag);\ndeclare const tag: string;\n',
+    "document.createElement('script');\n",
+    "document.createElement('iframe');\n",
+    "document.createElement('a');\n",
+    "document.createElementNS(ns, 'foreignObject');\ndeclare const ns: string;\n",
+    'document.createElementNS(ns, tag);\ndeclare const ns: string; declare const tag: string;\n',
+    "declare const el: any; declare const k: string;\nel.setAttribute(k, 'x');\n",
+    "declare const el: any;\nel.setAttribute('onclick', 'x');\n",
+    "declare const el: any;\nel.setAttribute('style', 'x');\n",
+    "declare const el: any;\nel.setAttribute('href', 'x');\n",
+    'declare const el: any;\nel.onclick = () => 0;\n',
+  ])('ui dom bans unsafe element construction: %s', async (code) => {
+    expect(await ruleHits(code, dom, 'no-restricted-syntax')).toBeGreaterThanOrEqual(1);
+  });
+
+  it('ui dom allows literal safe elements and attributes', async () => {
+    const code = [
+      "document.createElement('div');",
+      "document.createElementNS(ns, 'circle');",
+      'declare const ns: string; declare const el: any;',
+      "el.setAttribute('aria-label', 'x');",
+      "el.addEventListener('click', () => 0);",
+    ].join('\n');
+    expect(await ruleHits(code, dom, 'no-restricted-syntax')).toBe(0);
+  });
+
+  it.each([dom, core])('%s may use sim, round, weapons and maps as types only', async (file) => {
+    for (const spec of ['@sz/sim', '@sz/round', '@sz/weapons', '@sz/maps']) {
+      const value = `import { x } from '${spec}';\nexport const y = x;\n`;
+      const type = `import type { X } from '${spec}';\nexport type Y = X;\n`;
+      expect(await ruleHits(value, file, 'no-restricted-syntax'), spec).toBe(1);
+      expect(await ruleHits(type, file, 'no-restricted-syntax'), spec).toBe(0);
+      expect(await ruleHits(type, file, 'no-restricted-imports'), spec).toBe(0);
+    }
+  });
+
+  it('ui dom reaches its core through the alias; core cannot reach dom or the barrel', async () => {
+    expect(await ruleHits(importOf('@sz/ui/core/hud-diff'), dom, 'no-restricted-imports')).toBe(0);
+    expect(await ruleHits(importOf('@sz/ui/dom/mount'), core, 'no-restricted-imports')).toBe(1);
+    expect(await ruleHits(importOf('@sz/ui'), core, 'no-restricted-imports')).toBe(1);
+  });
+
+  it('ui dom may use document and window; ui core may not, nor DOM types', async () => {
+    const code = 'export const d = document;\nexport const w = window;\n';
+    expect(await ruleHits(code, dom, 'no-restricted-globals')).toBe(0);
+    expect(await ruleHits(code, core, 'no-restricted-globals')).toBe(2);
+    const types = 'export const f = (e: HTMLElement) => e;\n';
+    expect(await ruleHits(types, core, 'no-restricted-syntax')).toBe(1);
+    expect(await ruleHits(types, dom, 'no-restricted-syntax')).toBe(0);
+  });
+
+  it.each([dom, core, store])(
+    '%s bans storage, timers, console, Date and network',
+    async (file) => {
+      for (const code of [
+        'export const s = localStorage;\n',
+        'export const t = setTimeout(() => 0, 1);\n',
+        "console.error('x');\n",
+        'export const d = Date.now();\n',
+        "export const f = fetch('x');\n",
+        'export const g = globalThis;\n',
+      ]) {
+        expect(await ruleHits(code, file, 'no-restricted-globals'), code).toBe(1);
+      }
+    },
+  );
+
+  it('persistence bans revivers, spreads, for-in, Object.assign and clear()', async () => {
+    const reviver = "export const v: unknown = JSON.parse('1', (_k, v: unknown) => v);\n";
+    expect(await ruleHits(reviver, store, 'no-restricted-syntax')).toBe(1);
+    expect(
+      await ruleHits("export const v: unknown = JSON.parse('1');\n", store, 'no-restricted-syntax'),
+    ).toBe(0);
+    expect(
+      await ruleHits(
+        'declare const o: object;\nexport const c = { ...o };\n',
+        store,
+        'no-restricted-syntax',
+      ),
+    ).toBe(1);
+    expect(
+      await ruleHits(
+        'declare const a: number[];\nexport const c = [...a];\n',
+        store,
+        'no-restricted-syntax',
+      ),
+    ).toBe(0);
+    expect(
+      await ruleHits(
+        'declare const o: object;\nfor (const k in o) void k;\n',
+        store,
+        'no-restricted-syntax',
+      ),
+    ).toBe(1);
+    expect(
+      await ruleHits(
+        'export const c = Object.assign({}, {});\n',
+        store,
+        'no-restricted-properties',
+      ),
+    ).toBe(1);
+    expect(
+      await ruleHits(
+        'declare const m: Map<string, string>;\nm.clear();\n',
+        store,
+        'no-restricted-properties',
+      ),
+    ).toBe(1);
+  });
+
+  it('persistence may import @sz/stats values but not ui or round', async () => {
+    expect(await ruleHits(importOf('@sz/stats'), store, 'no-restricted-imports')).toBe(0);
+    expect(await ruleHits(importOf('@sz/ui'), store, 'no-restricted-imports')).toBe(1);
+    expect(await ruleHits(importOf('@sz/round'), store, 'no-restricted-imports')).toBe(1);
+  });
+
+  it('nothing else may import ui or persistence', async () => {
+    for (const file of ['src/sim/step.ts', 'src/ai/brain.ts', 'src/stats/summary.ts']) {
+      expect(await ruleHits(importOf('@sz/ui'), file, 'no-restricted-imports'), file).toBe(1);
+      expect(await ruleHits(importOf('@sz/persistence'), file, 'no-restricted-imports'), file).toBe(
+        1,
+      );
+    }
+    expect(await ruleHits(importOf('@sz/ui'), 'src/app/main.ts', 'no-restricted-imports')).toBe(0);
+  });
+});

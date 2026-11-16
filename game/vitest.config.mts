@@ -47,6 +47,9 @@ export default defineConfig({
         'src/sim/**': { lines: 90, branches: 85 },
         'src/round/**': { lines: 90, branches: 85 },
         'src/stats/**': { lines: 95, branches: 90 },
+        // ui-hud (tech-stack-decisions-ui-hud ADR-UI-6): persistence parses untrusted storage.
+        'src/persistence/**': { lines: 95, branches: 90 },
+        'src/ui/core/**': { lines: 90, branches: 85 },
       },
     },
   },

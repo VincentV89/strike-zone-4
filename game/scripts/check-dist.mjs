@@ -38,6 +38,16 @@ export const NOTICE_ALLOWED_URLS = new Set([
 ]);
 const NOTICE_REQUIRED_TEXT = ['Apache License', 'Version 2.0', '@dimforge/rapier3d-compat'];
 
+/**
+ * SD-UI-15: XML namespace identifiers passed to createElementNS (ui SVG) and used by three.js.
+ * They are names, not fetched URLs. Allowed by exact string, in .js files only.
+ */
+export const XML_NAMESPACE_URLS = new Set([
+  'http://www.w3.org/2000/svg',
+  'http://www.w3.org/1999/xhtml',
+]);
+const JS_FILE = /\.m?js$/i;
+
 /** True when the package at `root` ships Rapier, so the notice must be in dist/. */
 export function needsRapierNotice(root) {
   const pkgPath = join(root, 'package.json');
@@ -95,6 +105,7 @@ export function checkDist(root) {
       const isNotice = NOTICE_PATTERN.test(basename(file));
       for (const url of findExternalUrls(readFileSync(file, 'utf8'))) {
         if (isNotice && NOTICE_ALLOWED_URLS.has(url)) continue;
+        if (JS_FILE.test(file) && XML_NAMESPACE_URLS.has(url)) continue;
         failures.push(`${relative(root, file)}: external URL ${url}`);
       }
     }

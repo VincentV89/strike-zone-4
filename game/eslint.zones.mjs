@@ -484,6 +484,214 @@ const MATCH_LOOP_ZONES = [
   },
 ];
 
+// ---- ui-hud zones (security-design-ui-hud SD-UI-1 to SD-UI-5) ----
+
+/** SD-UI-3: ui has no I/O, timers, storage, dynamic code, wall clock or global escapes. */
+const UI_IO = named(
+  [
+    ...NO_IO_GLOBAL_NAMES,
+    'eval',
+    'Function',
+    'Reflect',
+    'WebAssembly',
+    'DOMParser',
+    'localStorage',
+    'sessionStorage',
+    'indexedDB',
+    'caches',
+    'location',
+    'open',
+    'Date',
+    'crypto',
+  ],
+  'SEC-UI-40/41: ui has no I/O, timers, storage, dynamic code or global escapes',
+);
+
+/** ui core and persistence are also pure: no window, document, navigator, rAF or performance. */
+const UI_PURE_GLOBALS = uniqueByName([...UI_IO, ...PURE_GLOBALS]);
+
+const prop = (property, message) => ({ property, message });
+const objProp = (object, property, message) => ({ object, property, message });
+
+/** SD-UI-4: HTML sinks, network/navigation escapes and layout reads (ui and ui core). */
+const UI_PROPERTIES = [
+  ...PURE_PROPERTIES,
+  ...[
+    'innerHTML',
+    'outerHTML',
+    'insertAdjacentHTML',
+    'createContextualFragment',
+    'srcdoc',
+    'parseFromString',
+  ].map((p) => prop(p, `SEC-UI-01: ${p} is an HTML sink; write text with textContent.`)),
+  objProp('document', 'write', 'SEC-UI-01: document.write is an HTML sink.'),
+  objProp('document', 'writeln', 'SEC-UI-01: document.writeln is an HTML sink.'),
+  ...['sendBeacon', 'defaultView', 'cookie'].map((p) =>
+    prop(p, `SEC-UI-41: ${p} reaches past the ui boundary.`),
+  ),
+  objProp('window', 'open', 'SEC-UI-41: ui never opens windows.'),
+  objProp('window', 'location', 'SEC-UI-41: ui never navigates.'),
+  objProp('document', 'location', 'SEC-UI-41: ui never navigates.'),
+  ...[
+    'offsetWidth',
+    'offsetHeight',
+    'offsetTop',
+    'offsetLeft',
+    'clientWidth',
+    'clientHeight',
+    'scrollWidth',
+    'scrollHeight',
+    'getBoundingClientRect',
+    'getClientRects',
+    'getComputedStyle',
+  ].map((p) => prop(p, `PERF-UI-11: ${p} forces layout; the HUD never measures.`)),
+];
+
+/** SD-UI-5 S1 to S8: literal element and attribute names, no on* handlers, no bus. */
+const UI_SYNTAX = [
+  {
+    selector: "CallExpression[callee.property.name='createElement'][arguments.0.type!='Literal']",
+    message: 'SEC-UI-02: createElement takes a literal tag name (use the el.ts helpers).',
+  },
+  {
+    selector: "CallExpression[callee.property.name='createElementNS'][arguments.1.type!='Literal']",
+    message: 'SEC-UI-02: createElementNS takes a literal tag name (use the el.ts helpers).',
+  },
+  {
+    selector:
+      'CallExpression[callee.property.name=/^createElement(NS)?$/] > Literal[value=/^(script|iframe|object|embed|link|style|meta|base|form|a|foreignObject)$/i]',
+    message: 'SEC-UI-02: this element is not allowed in ui.',
+  },
+  {
+    selector:
+      "CallExpression[callee.property.name=/^setAttribute(NS)?$/][arguments.0.type!='Literal']",
+    message: 'SEC-UI-03: setAttribute takes a literal attribute name (use the el.ts helpers).',
+  },
+  {
+    selector:
+      'CallExpression[callee.property.name=/^setAttribute(NS)?$/] > Literal.arguments:first-child[value=/^(on.*|style|href|src|srcdoc|formaction|xlink:href)$/i]',
+    message: 'SEC-UI-03: event-handler, style and URL attributes are not allowed in ui.',
+  },
+  {
+    selector: 'AssignmentExpression > MemberExpression.left[property.name=/^on[a-z]+$/]',
+    message: 'SEC-UI-03: no on* handler properties; use addEventListener through el.ts on().',
+  },
+  ...NO_DYNAMIC_IMPORT,
+  AI_NO_BUS,
+  ...typeOnly('@sz/sim'),
+  ...typeOnly('@sz/round'),
+  ...typeOnly('@sz/weapons'),
+  ...typeOnly('@sz/maps'),
+];
+
+const UI_SAMPLES = [
+  'three',
+  '@dimforge/rapier3d-compat',
+  '@sz/ai',
+  '@sz/ai/perception',
+  '@sz/nav',
+  '@sz/physics',
+  '@sz/combat',
+  '@sz/player',
+  '@sz/input',
+  '@sz/audio',
+  '@sz/render',
+  '@sz/assets',
+  '@sz/app',
+  '@sz/kernel/rng',
+  '@sz/ui',
+];
+
+const UI_ZONES = [
+  {
+    // SD-UI-1: each ui file matches exactly one zone (the input-unit precedent).
+    name: 'ui (L3)',
+    files: ['src/ui/**'],
+    ignores: ['src/ui/core/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!(@sz/(kernel|stats|persistence|sim|round|weapons|maps)|@sz/ui/core/[a-z-]+)$)[^.]',
+        'SD-UI-2: ui imports kernel, stats, persistence, its own core, and sim/round/weapons/maps types.',
+        [...UI_SAMPLES, '@sz/ui/dom/mount'],
+      ),
+    ],
+    allowed: [
+      '@sz/kernel',
+      '@sz/stats',
+      '@sz/persistence',
+      '@sz/sim',
+      '@sz/round',
+      '@sz/maps',
+      '@sz/ui/core/hud-diff',
+      './el',
+    ],
+    forbiddenGlobals: UI_IO,
+    forbiddenProperties: UI_PROPERTIES,
+    forbiddenSyntax: UI_SYNTAX,
+  },
+  {
+    // Repeats every ui (L3) entry and adds purity (SEC-UI-42).
+    name: 'ui core (L3-pure)',
+    files: ['src/ui/core/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!@sz/(kernel|stats|persistence|sim|round|weapons|maps)$)[^.]',
+        'SD-UI-2: ui core imports kernel, stats, persistence, and sim/round/weapons/maps types.',
+        [...UI_SAMPLES, '@sz/ui/dom/mount', '@sz/ui/core/effects'],
+      ),
+    ],
+    allowed: ['@sz/kernel', '@sz/stats', '@sz/persistence', '@sz/round', './format'],
+    forbiddenGlobals: UI_PURE_GLOBALS,
+    forbiddenProperties: UI_PROPERTIES,
+    forbiddenSyntax: [
+      ...UI_SYNTAX,
+      {
+        selector:
+          'TSTypeReference[typeName.name=/^(Event|Element|HTMLElement|SVGElement|Document|Window|Storage)$/]',
+        message: 'SD-UI-5 S9: ui core takes plain values, not DOM types.',
+      },
+    ],
+  },
+  {
+    // ADR-UI-6 item 3: persistence may use @sz/stats values (createSessionTotals).
+    name: 'persistence (L3)',
+    files: ['src/persistence/**'],
+    forbiddenImportPatterns: [
+      imp('^(?!@sz/(kernel|stats)$)[^.]', 'SD-UI-2: persistence imports only kernel and stats.', [
+        'three',
+        '@sz/ui',
+        '@sz/round',
+        '@sz/sim',
+        '@sz/app',
+        '@sz/kernel/rng',
+        '@sz/stats/totals',
+      ]),
+    ],
+    allowed: ['@sz/kernel', '@sz/stats', './envelope'],
+    forbiddenGlobals: UI_PURE_GLOBALS,
+    forbiddenProperties: [
+      ...PURE_PROPERTIES,
+      objProp('Object', 'assign', 'SEC-UI-11: build new literals; never merge parsed input.'),
+      objProp('Object', 'fromEntries', 'SEC-UI-11: build new literals from known keys.'),
+      prop('clear', 'SEC-UI-16: persistence never clears storage; touch strikezone:* keys only.'),
+    ],
+    forbiddenSyntax: [
+      ...NO_DYNAMIC_IMPORT,
+      AI_NO_BUS,
+      {
+        selector:
+          "CallExpression[callee.object.name='JSON'][callee.property.name='parse'][arguments.length>1]",
+        message: 'SEC-UI-10: JSON.parse without a reviver.',
+      },
+      {
+        selector: 'ObjectExpression > SpreadElement',
+        message: 'SEC-UI-11: no object spread; read known fields with own().',
+      },
+      { selector: 'ForInStatement', message: 'SEC-UI-11: never iterate parsed objects.' },
+    ],
+  },
+];
+
 /** @type {ReadonlyArray<Zone>} */
 export const ZONES = [
   {
@@ -698,24 +906,7 @@ export const ZONES = [
     forbiddenProperties: [],
     forbiddenSyntax: [],
   },
-  {
-    name: 'ui (L3)',
-    files: ['src/ui/**'],
-    forbiddenImportPatterns: [
-      THREE,
-      RAPIER,
-      imp(
-        '^@sz/(app|render|assets|physics)(/|$)',
-        'dec-import-boundaries: ui uses DOM only, never three, Rapier or app.',
-        ['@sz/render', '@sz/physics'],
-      ),
-      KERNEL_DEEP,
-    ],
-    allowed: ['@sz/kernel', '@sz/persistence'],
-    forbiddenGlobals: STORAGE_GLOBALS,
-    forbiddenProperties: [],
-    forbiddenSyntax: [],
-  },
+  ...UI_ZONES,
   {
     name: 'diagnostics (L3)',
     files: ['src/diagnostics/**'],
@@ -764,19 +955,20 @@ export const ZONES = [
     forbiddenSyntax: AUDIO_PARAM_SYNTAX,
   },
   {
-    name: 'persistence (L3)',
-    files: ['src/persistence/**'],
-    forbiddenImportPatterns: [THREE, RAPIER, APP, KERNEL_DEEP],
-    allowed: ['@sz/kernel'],
-    forbiddenGlobals: [],
-    forbiddenProperties: [],
-    forbiddenSyntax: [],
-  },
-  {
     name: 'app-shell (L4)',
     files: ['src/app/**'],
     forbiddenImportPatterns: [KERNEL_DEEP],
-    allowed: ['@sz/kernel', '@sz/round', '@sz/render', 'three', '@sz/player', '@sz/input'],
+    allowed: [
+      '@sz/kernel',
+      '@sz/round',
+      '@sz/render',
+      'three',
+      '@sz/player',
+      '@sz/input',
+      '@sz/ui',
+      '@sz/persistence',
+      '@sz/maps',
+    ],
     forbiddenGlobals: STORAGE_GLOBALS,
     forbiddenProperties: [],
     forbiddenSyntax: [],
