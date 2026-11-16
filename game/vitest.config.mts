@@ -43,6 +43,10 @@ export default defineConfig({
         // ADR-AI-4: bot-ai logic; the perception no-cheat gateway gets the kernel bar.
         'src/ai/**': { lines: 90, branches: 85 },
         'src/ai/perception/**': { lines: 95, branches: 90 },
+        // match-loop (tech-stack-decisions-match-loop): application layer and stats.
+        'src/sim/**': { lines: 90, branches: 85 },
+        'src/round/**': { lines: 90, branches: 85 },
+        'src/stats/**': { lines: 95, branches: 90 },
       },
     },
   },
