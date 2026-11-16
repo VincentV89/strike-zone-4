@@ -93,21 +93,28 @@ export interface FakeInput extends InputPort {
   intent: PlayerInputIntent;
   readonly counts: { poll: number; requestLock: number; releaseLock: number };
   readonly enabled: boolean[];
+  /** requestLock calls made while the adapter was enabled; the real adapter ignores the rest. */
+  readonly honouredLocks: number;
 }
 
 export function createFakeInput(): FakeInput {
   const counts = { poll: 0, requestLock: 0, releaseLock: 0 };
   const enabled: boolean[] = [];
+  let honoured = 0;
   const input: FakeInput = {
     intent: NEUTRAL_INTENT,
     counts,
     enabled,
+    get honouredLocks() {
+      return honoured;
+    },
     poll() {
       counts.poll++;
       return input.intent;
     },
     requestLock() {
       counts.requestLock++;
+      if (enabled.at(-1) === true) honoured++;
     },
     releaseLock() {
       counts.releaseLock++;

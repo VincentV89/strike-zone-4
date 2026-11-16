@@ -14,7 +14,7 @@ const pkg = JSON.parse(readFileSync(join(GAME, 'package.json'), 'utf8')) as {
 };
 const gitignore = readFileSync(join(GAME, '.gitignore'), 'utf8')
   .split('\n')
-  .map((l) => l.trim().replace(/\/$/, ''));
+  .map((l) => l.trim().replace(/^\//, '').replace(/\/$/, '')); // anchored or not
 
 const BUILD_OUTPUTS = ['dist', 'coverage', 'playwright-report', 'test-results', 'blob-report'];
 const EVIDENCE = ['e2e-results', 'evidence'];
@@ -34,6 +34,14 @@ describe('two-tier clean (SD-VS-5)', () => {
 
   it.each([...BUILD_OUTPUTS, ...EVIDENCE])('%s is git-ignored', (dir) => {
     expect(gitignore).toContain(dir);
+  });
+
+  it('evidence ignores are anchored, so game/test/evidence/ (the evidence test) is tracked', () => {
+    const raw = readFileSync(join(GAME, '.gitignore'), 'utf8')
+      .split('\n')
+      .map((l) => l.trim());
+    expect(raw).toContain('/evidence/');
+    expect(raw).toContain('/e2e-results/');
   });
 });
 

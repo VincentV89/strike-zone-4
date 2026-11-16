@@ -49,7 +49,9 @@ export class HookClient {
   async waitForBoot(timeoutMs = 90_000): Promise<void> {
     await this.page
       .getByTestId('loading-enter-button')
-      .and(this.page.locator(':enabled'))
+      // The button is never `disabled`; it stays aria-disabled="true" until boot attaches the
+      // world (req-loading-screen AC2), so `:enabled` would match before boot finishes.
+      .and(this.page.locator('[aria-disabled="false"]'))
       .waitFor({ timeout: timeoutMs });
   }
 

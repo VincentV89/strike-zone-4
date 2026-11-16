@@ -6,7 +6,7 @@
 import { BOT_MATRIX, MAPS, checkById, specTitle } from './support/checks';
 import { expect, requireWebgl, test } from './support/fixtures';
 import type { E2eSetup } from './support/hook';
-import { bootWithHook, fightUntilEnd, standUntilEnd, startLive } from './support/play';
+import { bootWithHook, fightUntilEnd, standUntilEnd, startLive, step } from './support/play';
 
 const seedOf = (id: string): number => checkById(id)?.seed ?? 1;
 
@@ -53,16 +53,12 @@ test(specTitle('movement-wasd'), async ({ page, hook }, testInfo) => {
   await bootWithHook(page, hook);
   await startLive(hook, { mapId: 'desert-compound', botCount: 1, difficulty: 'easy' }, 42);
   const start = await hook.snapshot();
-  await hook.inject({ move: { forward: 1, right: 0 } }, 60);
-  await page.waitForTimeout(1500);
-  const moved = await hook.snapshot();
+  const moved = await step(hook, { move: { forward: 1, right: 0 } }, 60);
   const d = (p?: { x: number; z: number }, q?: { x: number; z: number }): number =>
     p && q ? Math.hypot(p.x - q.x, p.z - q.z) : 0;
   expect(d(start?.player.pos, moved?.player.pos)).toBeGreaterThan(1);
   // Sprint into whatever is ahead for 5 s: the player stays inside the map bounds (collision).
-  await hook.inject({ move: { forward: 1, right: 0 }, sprint: true }, 300);
-  await page.waitForTimeout(6000);
-  const after = await hook.snapshot();
+  const after = await step(hook, { move: { forward: 1, right: 0 }, sprint: true }, 300, 120_000);
   expect(Math.abs(after?.player.pos.x ?? 1e9)).toBeLessThan(48);
   expect(Math.abs(after?.player.pos.z ?? 1e9)).toBeLessThan(48);
   expect(after?.player.pos.y ?? -1e9).toBeGreaterThan(-1);
@@ -73,17 +69,17 @@ test(specTitle('firing-ammo'), async ({ page, hook }, testInfo) => {
   await bootWithHook(page, hook);
   await startLive(hook, { mapId: 'desert-compound', botCount: 1, difficulty: 'easy' }, 43);
   const before = await hook.snapshot();
-  await hook.inject({ fire: true, firePressed: true }, 30);
-  await page.waitForTimeout(1000);
-  const fired = await hook.snapshot();
+  const fired = await step(hook, { fire: true, firePressed: true }, 30);
   const m0 = before?.player.weapon.magazine ?? 0;
   const m1 = fired?.player.weapon.magazine ?? m0;
   expect(m1).toBeLessThan(m0);
   await expect(page.getByTestId('hud-ammo-value')).toContainText(String(m1));
-  await hook.inject({ reload: true }, 1);
-  await hook.inject({}, 240);
-  await page.waitForTimeout(4500);
-  expect((await hook.snapshot())?.player.weapon.magazine).toBe(m0);
+  // step() waits for each inject to reach the sim, so the reload edge is not overwritten.
+  await step(hook, { reload: true }, 1);
+  await step(hook, {}, 240, 120_000);
+  await expect
+    .poll(async () => (await hook.snapshot())?.player.weapon.magazine, { timeout: 60_000 })
+    .toBe(m0);
 });
 
 for (const map of MAPS) {
@@ -106,9 +102,12 @@ for (const map of MAPS) {
 for (const map of MAPS) {
   test(specTitle(`win-${map}`), async ({ page, hook }, testInfo) => {
     requireWebgl(testInfo.project.name);
+    // The hunt walks the player to the bot; under software WebGL the sim runs at 10 to 16
+    // ticks per second, so a win can take about 40 s of sim time and 5 min of wall time.
+    test.setTimeout(480_000);
     await bootWithHook(page, hook);
     await startLive(hook, { mapId: map, botCount: 1, difficulty: 'easy' }, seedOf(`win-${map}`));
-    const outcome = await fightUntilEnd(hook, 150_000);
+    const outcome = await fightUntilEnd(hook, 420_000);
     expect(outcome).toBe('victory');
     await expect(page.getByTestId('screen-end')).toBeVisible({ timeout: 10_000 });
   });

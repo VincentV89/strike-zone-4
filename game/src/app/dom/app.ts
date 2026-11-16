@@ -270,6 +270,10 @@ export function createApp(deps: AppDeps): App {
         pendingStart = true; // runs at the top of the next frame, after map-loading paints
         return;
       case 'request-lock':
+        // The adapter ignores lock requests while disabled (SEC-P-06), and the machine enables
+        // play input only on lock-gained. Enabling first is safe: held input stays inactive
+        // until the lock is actually granted (bind.ts sync: enabled && locked).
+        input.setEnabled(true);
         input.requestLock();
         return;
       case 'release-lock':

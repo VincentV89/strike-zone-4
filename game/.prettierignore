@@ -5,5 +5,5 @@ package-lock.json
 playwright-report
 test-results
 blob-report
-e2e-results
-evidence
+/e2e-results
+/evidence

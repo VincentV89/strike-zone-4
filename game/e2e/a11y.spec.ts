@@ -58,9 +58,10 @@ test(specTitle('a11y-pause'), async ({ page, hook }, testInfo) => {
 
 test(specTitle('a11y-end'), async ({ page, hook }, testInfo) => {
   requireWebgl(testInfo.project.name);
+  test.setTimeout(480_000); // same hunt budget as the win checks
   await bootWithHook(page, hook);
   await startLive(hook, { mapId: 'desert-compound', botCount: 1, difficulty: 'easy' }, 32);
-  await fightUntilEnd(hook, 140_000);
+  await fightUntilEnd(hook, 420_000);
   await expect(page.getByTestId('screen-end')).toBeVisible({ timeout: 10_000 });
   await scan(page, testInfo);
 });

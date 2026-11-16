@@ -118,6 +118,25 @@ describe('match flow', () => {
     expect(h.screen()).toBe('capture');
   });
 
+  it('capture and resume enable input before requesting the lock (e2e defect BT-1)', () => {
+    // The real adapter drops requestLock while disabled (SEC-P-06). Found by the first real
+    // browser run: menus-keyboard-start saw zero requestPointerLock calls.
+    const h = createAppHarness();
+    h.app.signal({ kind: 'boot-ready' });
+    h.send({ kind: 'enter' });
+    h.send({ kind: 'start-match' });
+    h.frames(1);
+    h.send({ kind: 'capture-and-start' });
+    expect(h.input.counts.requestLock).toBe(1);
+    expect(h.input.honouredLocks).toBe(1);
+    h.app.signal({ kind: 'lock-gained' });
+    h.app.signal({ kind: 'lock-lost', reason: 'external' });
+    expect(h.screen()).toBe('pause');
+    expect(h.input.enabled.at(-1)).toBe(false);
+    h.send({ kind: 'resume' });
+    expect(h.input.honouredLocks).toBe(2);
+  });
+
   it('the canvas click captures only on the capture prompt', () => {
     const h = createAppHarness();
     h.app.canvasClick();

@@ -163,6 +163,12 @@ export function start(win: Window): void {
   canvas.addEventListener('click', () => {
     theApp.canvasClick();
   });
+  // req-pause-menu AC2: leaving the window (alt-tab, DevTools, another app) pauses a live round
+  // even when the browser has not dropped pointer lock yet, or never held it. The machine treats
+  // this exactly like an external lock loss, so a later real lock-lost on Pause is ignored.
+  win.addEventListener('blur', () => {
+    theApp.signal({ kind: 'lock-lost', reason: 'external' });
+  });
 
   // SEC-AS-31: stray errors and rejections end the session honestly; nothing is suppressed.
   win.addEventListener('error', (e: ErrorEvent) => {
