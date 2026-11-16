@@ -75,6 +75,48 @@ const PURE_PROPERTIES = [
   { object: 'Math', property: 'random', message: 'SEC-K-07: use the injected Rng (BR-K-34).' },
 ];
 
+/** SD-WM-6: network, workers, timers, dynamic code loading and global escapes. */
+const IO_GLOBALS = [
+  'fetch',
+  'XMLHttpRequest',
+  'WebSocket',
+  'Worker',
+  'setTimeout',
+  'setInterval',
+  'queueMicrotask',
+  'globalThis',
+  'WebAssembly',
+].map((name) => ({ name, message: `SD-WM-6: ${name} is not allowed in this layer.` }));
+
+/** maps and nav (L1): pure data and maths, no console at all. */
+const WORLD_L1_GLOBALS = [
+  ...PURE_GLOBALS,
+  { name: 'console', message: 'SD-WM-6: maps and nav report through return values, not console.' },
+  ...IO_GLOBALS,
+];
+
+const NO_DYNAMIC_IMPORT = [
+  { selector: 'ImportExpression', message: 'SD-WM-6: no dynamic import() in this layer.' },
+];
+
+const L1_WORLD_SAMPLES = [
+  'three',
+  '@dimforge/rapier3d-compat',
+  '@sz/sim',
+  '@sz/physics',
+  '@sz/player',
+];
+
+/** physics (L3): only console.error remains, for once-per-kind fault reports (SD-WM-3). */
+const PHYSICS_PROPERTIES = [
+  ...PURE_PROPERTIES,
+  ...['log', 'warn', 'info', 'debug', 'trace'].map((property) => ({
+    object: 'console',
+    property,
+    message: 'SD-WM-3: physics reports faults with console.error only.',
+  })),
+];
+
 /** @type {ReadonlyArray<Zone>} */
 export const ZONES = [
   {
@@ -101,14 +143,7 @@ export const ZONES = [
   },
   {
     name: 'domain (L1)',
-    files: [
-      'src/maps/**',
-      'src/nav/**',
-      'src/player/**',
-      'src/weapons/**',
-      'src/combat/**',
-      'src/stats/**',
-    ],
+    files: ['src/player/**', 'src/weapons/**', 'src/combat/**', 'src/stats/**'],
     forbiddenImportPatterns: L1_IMPORTS,
     allowed: ['@sz/kernel', '@sz/nav'],
     forbiddenGlobals: PURE_GLOBALS,
@@ -176,6 +211,36 @@ export const ZONES = [
     forbiddenSyntax: [],
   },
   {
+    name: 'maps (L1)',
+    files: ['src/maps/**'],
+    forbiddenImportPatterns: [
+      imp('^(?!@sz/kernel$)[^.]', 'BR-WM-06: map-catalog imports only @sz/kernel.', [
+        ...L1_WORLD_SAMPLES,
+        '@sz/nav',
+        '@sz/kernel/rng',
+      ]),
+    ],
+    allowed: ['@sz/kernel', './types'],
+    forbiddenGlobals: WORLD_L1_GLOBALS,
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: NO_DYNAMIC_IMPORT,
+  },
+  {
+    name: 'nav (L1)',
+    files: ['src/nav/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!@sz/(kernel|maps)$)[^.]',
+        'BR-WM-06: navigation imports only @sz/kernel and @sz/maps.',
+        [...L1_WORLD_SAMPLES, '@sz/kernel/rng', '@sz/maps/types'],
+      ),
+    ],
+    allowed: ['@sz/kernel', '@sz/maps', './types'],
+    forbiddenGlobals: WORLD_L1_GLOBALS,
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: NO_DYNAMIC_IMPORT,
+  },
+  {
     name: 'physics adapter (L3)',
     files: ['src/physics/**'],
     forbiddenImportPatterns: [
@@ -185,12 +250,33 @@ export const ZONES = [
         'dec-import-boundaries: physics must not import application layers or other adapters.',
         ['@sz/sim', '@sz/render', '@sz/app'],
       ),
+      imp(
+        '^@sz/(nav|player|weapons|combat|ai|perception|stats)(/|$)',
+        'SD-WM-6: physics must not import domain gameplay or navigation.',
+        ['@sz/nav', '@sz/player', '@sz/combat', '@sz/ai'],
+      ),
+      imp('^@dimforge/rapier3d-compat/', 'SD-WM-10: import Rapier through its package root only.', [
+        '@dimforge/rapier3d-compat/dist/rapier.mjs',
+      ]),
+      imp('^@dimforge/rapier3d$', 'SD-WM-10: use the compat build (inlined WASM, no fetch).', [
+        '@dimforge/rapier3d',
+      ]),
       KERNEL_DEEP,
     ],
     allowed: ['@sz/kernel', '@sz/maps', '@dimforge/rapier3d-compat'],
-    forbiddenGlobals: BROWSER_GLOBALS,
-    forbiddenProperties: [],
-    forbiddenSyntax: [],
+    forbiddenGlobals: [
+      ...BROWSER_GLOBALS,
+      { name: 'Date', message: 'BR-WM-71: the adapter takes dt from the caller.' },
+      { name: 'crypto', message: 'SEC-K-07: no randomness in the adapter.' },
+      ...IO_GLOBALS,
+    ],
+    forbiddenProperties: PHYSICS_PROPERTIES,
+    forbiddenSyntax: [
+      {
+        selector: "ImportExpression:not([source.value='@dimforge/rapier3d-compat'])",
+        message: 'SD-WM-10: the only dynamic import in physics is Rapier itself.',
+      },
+    ],
   },
   {
     name: 'render and assets (L3)',

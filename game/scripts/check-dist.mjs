@@ -1,7 +1,7 @@
 // Post-build dist check (decision SD-K-3, SEC-K-13, SEC-K-14, BR-K-59).
 // Node built-ins only. Run after `vite build` and before dist/ is removed.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const TEXT_EXTENSIONS = /\.(html|js|mjs|css|json|svg|txt|map)$/i;
@@ -25,6 +25,39 @@ export function findIndexHtmlProblems(html) {
 /** SEC-K-14: http:// or https:// outside licence banners. */
 export function findExternalUrls(text) {
   return [...stripAllowedUrlContext(text).matchAll(/https?:\/\/[^\s"'`)<>]*/gi)].map((m) => m[0]);
+}
+
+/** SD-WM-11: the Rapier Apache-2.0 notice is a hashed asset; only it may carry these two URLs. */
+export const NOTICE_PATTERN = /^third-party-notices-[\w-]+\.txt$/;
+export const NOTICE_ALLOWED_URLS = new Set([
+  'http://www.apache.org/licenses/',
+  'http://www.apache.org/licenses/LICENSE-2.0',
+]);
+const NOTICE_REQUIRED_TEXT = ['Apache License', 'Version 2.0', '@dimforge/rapier3d-compat'];
+
+/** True when the package at `root` ships Rapier, so the notice must be in dist/. */
+export function needsRapierNotice(root) {
+  const pkgPath = join(root, 'package.json');
+  if (!existsSync(pkgPath)) return false;
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+  return Boolean(pkg.dependencies && pkg.dependencies['@dimforge/rapier3d-compat']);
+}
+
+function checkNotice(dist, failures) {
+  const assets = join(dist, 'assets');
+  const notices = existsSync(assets)
+    ? readdirSync(assets).filter((n) => NOTICE_PATTERN.test(n))
+    : [];
+  if (notices.length !== 1) {
+    failures.push(
+      `expected exactly one dist/assets/third-party-notices-*.txt, found ${notices.length} (SD-WM-11)`,
+    );
+    return;
+  }
+  const text = readFileSync(join(assets, notices[0]), 'utf8');
+  for (const needle of NOTICE_REQUIRED_TEXT) {
+    if (!text.includes(needle)) failures.push(`dist/assets/${notices[0]}: missing "${needle}"`);
+  }
 }
 
 function listFiles(dir) {
@@ -52,10 +85,13 @@ export function checkDist(root) {
   if (existsSync(dist)) {
     for (const file of listFiles(dist)) {
       if (!TEXT_EXTENSIONS.test(file)) continue;
+      const isNotice = NOTICE_PATTERN.test(basename(file));
       for (const url of findExternalUrls(readFileSync(file, 'utf8'))) {
+        if (isNotice && NOTICE_ALLOWED_URLS.has(url)) continue;
         failures.push(`${relative(root, file)}: external URL ${url}`);
       }
     }
+    if (needsRapierNotice(root)) checkNotice(dist, failures);
   }
   const pub = join(root, 'public');
   if (existsSync(pub) && readdirSync(pub).length > 0) {

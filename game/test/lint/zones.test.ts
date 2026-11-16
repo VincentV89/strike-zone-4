@@ -2,6 +2,7 @@
 // eslint.config.mjs and proves every zone entry fires. Cases are generated from
 // eslint.zones.mjs, plus a hand-pinned no-cheat list so deleting that row fails too.
 import { fileURLToPath } from 'node:url';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ESLint, type Linter } from 'eslint';
 import tseslint from 'typescript-eslint';
@@ -166,5 +167,39 @@ describe('outside the zones', () => {
     expect(
       await ruleHits('export const r = Math.random();\n', file, 'no-restricted-properties'),
     ).toBe(1);
+  });
+});
+
+// SD-WM-6 / SD-WM-10: dynamic import() is closed for maps, nav and physics; physics may load
+// only Rapier itself that way.
+describe('dynamic import (world-maps zones)', () => {
+  const dyn = (spec: string) => `export const m = import('${spec}');\n`;
+  it.each(['src/maps/__canary__.ts', 'src/nav/__canary__.ts'])('is banned in %s', async (file) => {
+    expect(await ruleHits(dyn('@sz/kernel'), file, 'no-restricted-syntax')).toBe(1);
+  });
+  it('physics may dynamically import only @dimforge/rapier3d-compat', async () => {
+    const file = 'src/physics/__canary__.ts';
+    expect(await ruleHits(dyn('@dimforge/rapier3d-compat'), file, 'no-restricted-syntax')).toBe(0);
+    expect(await ruleHits(dyn('@sz/kernel'), file, 'no-restricted-syntax')).toBe(1);
+  });
+  it('physics may still call console.error', async () => {
+    const code = "console.error('x');\nexport const a = 1;\n";
+    expect(await ruleHits(code, 'src/physics/__canary__.ts', 'no-restricted-properties')).toBe(0);
+    expect(await ruleHits(code, 'src/physics/__canary__.ts', 'no-restricted-globals')).toBe(0);
+  });
+});
+
+// Every src/<dir> on disk matches exactly one zone, so no directory is unzoned or double-zoned.
+describe('one zone per directory', () => {
+  const matches = (zone: Zone, rel: string) => {
+    const inside = (glob: string) => rel.startsWith(glob.replace('**', ''));
+    return zone.files.some(inside) && !(zone.ignores ?? []).some(inside);
+  };
+  const dirs = readdirSync(join(ROOT, 'src'), { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
+  it.each(dirs)('src/%s', (dir) => {
+    const hit = ZONES.filter((z) => matches(z, `src/${dir}/__probe__.ts`)).map((z) => z.name);
+    expect(hit).toHaveLength(1);
   });
 });
