@@ -75,6 +75,166 @@ const PURE_PROPERTIES = [
   { object: 'Math', property: 'random', message: 'SEC-K-07: use the injected Rng (BR-K-34).' },
 ];
 
+// ---- player-movement zones (security-design-player-movement SD-P-1 to SD-P-3) ----
+
+const named = (names, message) => names.map((name) => ({ name, message: `${message} (${name})` }));
+
+/** Output, timer and escape-hatch globals banned in player and input code (SEC-P-14 to SEC-P-16). */
+const NO_IO_GLOBAL_NAMES = [
+  'console',
+  'fetch',
+  'XMLHttpRequest',
+  'WebSocket',
+  'EventSource',
+  'Worker',
+  'SharedWorker',
+  'BroadcastChannel',
+  'Image',
+  'setTimeout',
+  'setInterval',
+  'setImmediate',
+  'queueMicrotask',
+  'requestIdleCallback',
+  'globalThis',
+  'self',
+  'top',
+  'parent',
+  'frames',
+  'isFinite',
+  'isNaN',
+];
+
+const PLAYER_GLOBALS = [
+  ...PURE_GLOBALS,
+  ...named(
+    [...NO_IO_GLOBAL_NAMES, 'eval'],
+    'SD-P-4/SEC-P-15: player code has no I/O, timers or coercing globals; use Number.isFinite',
+  ),
+];
+
+/** DOM handles reach src/input only through createInput(deps) (SD-P-3). */
+const INPUT_GLOBALS = named(
+  [
+    'window',
+    'document',
+    'navigator',
+    'localStorage',
+    'sessionStorage',
+    'indexedDB',
+    'caches',
+    'location',
+    'postMessage',
+    'requestAnimationFrame',
+    'Date',
+    'crypto',
+    ...NO_IO_GLOBAL_NAMES,
+  ],
+  'SEC-P-16: input uses only injected DOM ports, never globals, storage, network or console',
+);
+
+const INPUT_SAMPLES = [
+  'three',
+  '@dimforge/rapier3d-compat',
+  '@sz/sim',
+  '@sz/nav',
+  '@sz/weapons',
+  '@sz/kernel/rng',
+  '@sz/player/movement',
+  'node:fs',
+];
+
+/** SD-P-2: input may see @sz/player only through whole-declaration `import type`. */
+const PLAYER_TYPE_ONLY = [
+  {
+    selector: "ImportDeclaration[source.value='@sz/player'][importKind!='type']",
+    message: 'SD-P-2: import @sz/player with `import type { ... }` only.',
+  },
+  {
+    selector: "ExportNamedDeclaration[source.value='@sz/player'][exportKind!='type']",
+    message: 'SD-P-2: re-export @sz/player types only.',
+  },
+  {
+    selector: "ExportAllDeclaration[source.value='@sz/player']",
+    message: 'SD-P-2: no export-all from @sz/player.',
+  },
+  {
+    selector: "ImportExpression[source.value='@sz/player']",
+    message: 'SD-P-2: no dynamic import of @sz/player.',
+  },
+];
+
+/** SD-P-3: members that reach past the narrow ports to the network or the wider DOM. */
+const DOM_ESCAPE_MEMBERS = {
+  selector:
+    'MemberExpression[property.name=/^(defaultView|ownerDocument|createElement|sendBeacon|cookie|location|parentElement|getRootNode)$/]',
+  message: 'SD-P-3: input may use only the members declared in src/input/dom/ports.ts.',
+};
+
+const PLAYER_INPUT_ZONES = [
+  {
+    name: 'player (L1)',
+    files: ['src/player/**'],
+    forbiddenImportPatterns: [
+      imp('^(?!@sz/kernel$)[^.]', 'BR-P-01: src/player imports only @sz/kernel.', [
+        'three',
+        '@dimforge/rapier3d-compat',
+        '@sz/sim',
+        '@sz/nav',
+        '@sz/weapons',
+        '@sz/kernel/rng',
+        '@sz/input',
+        'node:fs',
+      ]),
+    ],
+    allowed: ['@sz/kernel', './motion'],
+    forbiddenGlobals: PLAYER_GLOBALS,
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: [],
+  },
+  {
+    name: 'input (L3)',
+    files: ['src/input/**'],
+    ignores: ['src/input/core/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!(@sz/(kernel|player)|@sz/input/core/[a-z-]+)$)[^.]',
+        'SD-P-1: src/input imports only @sz/kernel, @sz/player types and its own core.',
+        [...INPUT_SAMPLES, '@sz/input', '@sz/input/dom/bind'],
+      ),
+    ],
+    allowed: ['@sz/kernel', '@sz/player', '@sz/input/core/state', './lock'],
+    forbiddenGlobals: INPUT_GLOBALS,
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: [...PLAYER_TYPE_ONLY, DOM_ESCAPE_MEMBERS],
+  },
+  {
+    name: 'input core (L3-pure)',
+    files: ['src/input/core/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!@sz/(kernel|player)$)[^.]',
+        'SD-P-1: the input core imports only @sz/kernel and @sz/player types.',
+        [...INPUT_SAMPLES, '@sz/input/dom/bind'],
+      ),
+    ],
+    allowed: ['@sz/kernel', '@sz/player', './bindings'],
+    forbiddenGlobals: [
+      ...INPUT_GLOBALS,
+      { name: 'performance', message: 'SEC-P-16: the input core is pure (performance).' },
+    ],
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: [
+      ...PLAYER_TYPE_ONLY,
+      DOM_ESCAPE_MEMBERS,
+      {
+        selector:
+          'TSTypeReference[typeName.name=/^(Event|KeyboardEvent|MouseEvent|WheelEvent|EventTarget|Document|Window|Element|HTMLElement)$/]',
+        message: 'SD-P-3: the input core takes plain values, not DOM types.',
+      },
+    ],
+  },
+];
+
 /** @type {ReadonlyArray<Zone>} */
 export const ZONES = [
   {
@@ -101,14 +261,7 @@ export const ZONES = [
   },
   {
     name: 'domain (L1)',
-    files: [
-      'src/maps/**',
-      'src/nav/**',
-      'src/player/**',
-      'src/weapons/**',
-      'src/combat/**',
-      'src/stats/**',
-    ],
+    files: ['src/maps/**', 'src/nav/**', 'src/weapons/**', 'src/combat/**', 'src/stats/**'],
     forbiddenImportPatterns: L1_IMPORTS,
     allowed: ['@sz/kernel', '@sz/nav'],
     forbiddenGlobals: PURE_GLOBALS,
@@ -228,14 +381,15 @@ export const ZONES = [
     forbiddenSyntax: [],
   },
   {
-    name: 'input, audio, diagnostics (L3)',
-    files: ['src/input/**', 'src/audio/**', 'src/diagnostics/**'],
+    name: 'audio, diagnostics (L3)',
+    files: ['src/audio/**', 'src/diagnostics/**'],
     forbiddenImportPatterns: [THREE, RAPIER, APP, KERNEL_DEEP],
     allowed: ['@sz/kernel'],
     forbiddenGlobals: STORAGE_GLOBALS,
     forbiddenProperties: [],
     forbiddenSyntax: [],
   },
+  ...PLAYER_INPUT_ZONES,
   {
     name: 'persistence (L3)',
     files: ['src/persistence/**'],
@@ -249,7 +403,7 @@ export const ZONES = [
     name: 'app-shell (L4)',
     files: ['src/app/**'],
     forbiddenImportPatterns: [KERNEL_DEEP],
-    allowed: ['@sz/kernel', '@sz/round', '@sz/render', 'three'],
+    allowed: ['@sz/kernel', '@sz/round', '@sz/render', 'three', '@sz/player', '@sz/input'],
     forbiddenGlobals: STORAGE_GLOBALS,
     forbiddenProperties: [],
     forbiddenSyntax: [],

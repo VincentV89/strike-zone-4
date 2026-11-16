@@ -168,3 +168,89 @@ describe('outside the zones', () => {
     ).toBe(1);
   });
 });
+
+// Hand-pinned player-movement canaries (security-design-player-movement, zone data).
+describe('player and input zones (SD-P-1 to SD-P-3, hand-pinned)', () => {
+  it('src/player can no longer import @sz/nav (the old L1 allowance is gone)', async () => {
+    expect(await ruleHits(importOf('@sz/nav'), 'src/player/x.ts', 'no-restricted-imports')).toBe(1);
+  });
+
+  it('input DOM code cannot reach past the ports (defaultView), but may read pointerLockElement', async () => {
+    const file = 'src/input/dom/x.ts';
+    const reach =
+      'export const f = (deps: { doc: { defaultView: unknown } }) => deps.doc.defaultView;\n';
+    const ok =
+      'export const f = (deps: { doc: { pointerLockElement: unknown } }) => deps.doc.pointerLockElement;\n';
+    expect(await ruleHits(reach, file, 'no-restricted-syntax')).toBe(1);
+    expect(await ruleHits(ok, file, 'no-restricted-syntax')).toBe(0);
+  });
+
+  it('the input core takes plain values, not DOM types', async () => {
+    const code = 'export const f = (e: KeyboardEvent) => e;\n';
+    expect(await ruleHits(code, 'src/input/core/x.ts', 'no-restricted-syntax')).toBe(1);
+    expect(await ruleHits(code, 'src/input/dom/x.ts', 'no-restricted-syntax')).toBe(0);
+  });
+
+  it('bot-ai still cannot import @sz/player (no-cheat unchanged)', async () => {
+    expect(await ruleHits(importOf('@sz/player'), 'src/ai/x.ts', 'no-restricted-imports')).toBe(1);
+  });
+
+  it('player code must use Number.isFinite, not the coercing global', async () => {
+    const file = 'src/player/x.ts';
+    expect(await ruleHits('export const a = isFinite(1);\n', file, 'no-restricted-globals')).toBe(
+      1,
+    );
+    expect(
+      await ruleHits('export const a = Number.isFinite(1);\n', file, 'no-restricted-globals'),
+    ).toBe(0);
+  });
+
+  it.each([
+    "import { stepMovement } from '@sz/player';\nexport const a = stepMovement;\n",
+    "import { type PlayerInputIntent } from '@sz/player';\nexport type A = PlayerInputIntent;\n",
+    "export { stepMovement } from '@sz/player';\n",
+    "export * from '@sz/player';\n",
+    "export const p = import('@sz/player');\n",
+  ])('input forbids value use of @sz/player: %s', async (code) => {
+    expect(await ruleHits(code, 'src/input/dom/x.ts', 'no-restricted-syntax')).toBe(1);
+    expect(await ruleHits(code, 'src/input/core/x.ts', 'no-restricted-syntax')).toBe(1);
+  });
+
+  it('input allows whole-declaration type imports and type re-exports of @sz/player', async () => {
+    const code =
+      "import type { PlayerInputIntent } from '@sz/player';\nexport type { MoveAxes } from '@sz/player';\nexport type A = PlayerInputIntent;\n";
+    expect(await ruleHits(code, 'src/input/dom/x.ts', 'no-restricted-syntax')).toBe(0);
+    expect(await ruleHits(code, 'src/input/dom/x.ts', 'no-restricted-imports')).toBe(0);
+  });
+
+  it('input DOM code may import its own core; the core may not import the DOM side', async () => {
+    expect(
+      await ruleHits(
+        importOf('@sz/input/core/state'),
+        'src/input/dom/x.ts',
+        'no-restricted-imports',
+      ),
+    ).toBe(0);
+    expect(
+      await ruleHits(
+        importOf('@sz/input/dom/bind'),
+        'src/input/core/x.ts',
+        'no-restricted-imports',
+      ),
+    ).toBe(1);
+  });
+
+  it.each(['src/player/movement.ts', 'src/input/dom/bind.ts', 'src/input/core/state.ts'])(
+    '%s is matched by exactly one zone',
+    async (file) => {
+      const real = new ESLint({ cwd: ROOT });
+      const matched = ZONES.filter(
+        (z) =>
+          z.files.some((g) => file.startsWith(g.replace('**', ''))) &&
+          !(z.ignores ?? []).some((g) => file.startsWith(g.replace('**', ''))),
+      );
+      expect(matched.map((z) => z.name)).toHaveLength(1);
+      expect(await real.isPathIgnored(join(ROOT, file))).toBe(false);
+    },
+  );
+});
