@@ -126,6 +126,28 @@ describe('check-dist (SD-K-3)', () => {
     ]);
   });
 
+  describe('XML namespace allow-list (SD-UI-15)', () => {
+    it('allows the SVG and XHTML namespace strings in .js files', () => {
+      const root = makeRoot({
+        'dist/index.html': GOOD_INDEX,
+        'dist/assets/index-1.js': 'a="http://www.w3.org/2000/svg";b="http://www.w3.org/1999/xhtml"',
+      });
+      expect(checkDist(root)).toEqual([]);
+    });
+
+    it('rejects near misses and the namespace in non-js files', () => {
+      const root = makeRoot({
+        'dist/index.html': GOOD_INDEX,
+        'dist/assets/index-1.js': 'a="http://www.w3.org/2000/svgx"',
+        'dist/assets/index-1.css': 'a{b:"http://www.w3.org/2000/svg"}',
+      });
+      expect(checkDist(root).sort()).toEqual([
+        'dist/assets/index-1.css: external URL http://www.w3.org/2000/svg',
+        'dist/assets/index-1.js: external URL http://www.w3.org/2000/svgx',
+      ]);
+    });
+  });
+
   describe('presentation-3d rules (SD-R-4)', () => {
     it('allows only the exact XHTML namespace URL in code', () => {
       const ok = makeRoot({

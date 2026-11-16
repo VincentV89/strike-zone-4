@@ -23,13 +23,13 @@ The root `npm run verify` runs game verify, then infra verify (whose `cdk synth`
 
 Cross-directory imports use the `@sz/<dir>` alias (tsconfig, Vite and Vitest). Imports starting with `../` are banned in `src/`. Other units import the kernel only through `@sz/kernel`.
 
-| Layer | Directories                                                                                                                                            |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| L0    | `kernel` (imports nothing, no browser globals, no `Date`, `Math.random`, `crypto`, `import.meta`)                                                      |
-| L1    | `maps`, `nav`, `player`, `stats`, `ai` (bot-ai), `ai/perception`; `weapons` (kernel only) and `combat` (kernel and weapons only) have their own zones  |
-| L2    | `sim`, `round`                                                                                                                                         |
-| L3    | `physics` (Rapier only), `render`, `assets` (Three.js only), `ui`, `input`, `audio`, `diagnostics`, `persistence` (only zone allowed to touch storage) |
-| L4    | `app`                                                                                                                                                  |
+| Layer | Directories                                                                                                                                           |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| L0    | `kernel` (imports nothing, no browser globals, no `Date`, `Math.random`, `crypto`, `import.meta`)                                                     |
+| L1    | `maps`, `nav`, `player`, `stats`, `ai` (bot-ai), `ai/perception`; `weapons` (kernel only) and `combat` (kernel and weapons only) have their own zones |
+| L2    | `sim`, `round`                                                                                                                                        |
+| L3    | `physics` (Rapier only), `render`, `assets` (Three.js only), `ui` and `ui/core`, `input`, `audio`, `diagnostics`, `persistence` (storage is injected) |
+| L4    | `app`                                                                                                                                                 |
 
 `src/ai/**` outside `perception` may not import `@sz/player`, `@sz/combat`, `@sz/sim` or `@sz/physics` (req-bot-no-cheat). The zones live as data in `eslint.zones.mjs`; `test/lint/zones.test.ts` generates a canary case for every entry. Loosening a zone needs a decision record.
 
@@ -83,6 +83,13 @@ audio.duck(paused);
 - `@sz/physics`: the only Rapier importer. `initPhysics()` (boot step, dynamic import, retryable `BootError`), `createPhysicsHost()` (one live world; build nav graphs with `host.query`), `createPhysicsWorld(map)`, `DEFAULT_CHARACTER`. Per tick: moves, `syncHitboxes`, one `step(1/60)`, then combat raycasts.
 - Map tests run every map in `test/maps/shipped-maps.ts` against real Rapier, including a link walk with the real character controller. Rapier suites skip only when `SZ_ALLOW_RAPIER_SKIP=1` is set.
 - The build emits `assets/third-party-notices-<hash>.txt` (Rapier's Apache-2.0 licence); `check:dist` requires it.
+
+## Menus, HUD and persistence (ui-hud)
+
+- `@sz/persistence` (`src/persistence/`): `createStore({ storage, now, schedule, onStatus, onSaved })`. Four `strikezone:*` keys in `{ schemaVersion: 1, data }` envelopes; reads are validate-or-default (65,536-char cap, no reviver, per-field settings repair); any storage throw switches to a session-only memory store without logging. Settings writes are debounced 250 ms (`flush()` on `pagehide`); `recordRound(summary)` is idempotent and saves history (newest 20) plus the lifetime W/L record; `clearHistory()` keeps the record.
+- `src/ui/core/` is pure and covered: effect reducers (hit marker, damage arcs, kill feed, radar pings, toast, announcer, live tally), the memoised `toHudViewModel`, `diffHud` (fixed leaf table, at most 128 patches per frame), the radar fair-play gate (`toRadarModel` draws only `alive && revealed` bots and heard shots), and the screen models and reducers (`applySetupChange`, `applySettingChange`, pause/abandon, end, history, loading, unsupported).
+- `src/ui/dom/` (excluded from coverage, checked by Playwright later) is flat: `el.ts` helpers, `hud.ts` (pools built once, patch writer), `screens.ts`, `widgets.ts`, `mount.ts` (`createUi(root, send, env)`) and `styles.css` (tokens pinned to `TOKENS`). Every interactive element and HUD value has a `data-testid`; radar diamonds carry `data-bot`.
+- app-shell (B8) owns the wiring: obtain `window.localStorage` inside a `try`, seed `createRound({ totals: store.record() })`, call `ui.onEvents(bus.drain(), snapshot, graphics)` then `ui.updateHud(...)` inside one `try` per frame (on a throw: `console.error` once, `ui.showHudFault()`, skip the HUD until the next round, then `ui.resetHud()`), call `ui.setRadarOutline(collidersToRadarSegments(map))` once per map load, and request pointer lock synchronously inside the `capture-and-start` and `resume` intents.
 
 ## Presentation (`src/render/`, `src/assets/`)
 

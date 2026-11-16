@@ -74,6 +74,16 @@ function runtimeDependencies(root) {
   return Object.keys(pkg.dependencies ?? {});
 }
 
+/**
+ * SD-UI-15: XML namespace identifiers passed to createElementNS (ui SVG) and used by three.js.
+ * They are names, not fetched URLs. Allowed by exact string, in .js files only.
+ */
+export const XML_NAMESPACE_URLS = new Set([
+  'http://www.w3.org/2000/svg',
+  'http://www.w3.org/1999/xhtml',
+]);
+const JS_FILE = /\.m?js$/i;
+
 /** True when the package at `root` ships Rapier, so the notice must be in dist/. */
 export function needsRapierNotice(root) {
   return runtimeDependencies(root).includes('@dimforge/rapier3d-compat');
@@ -140,6 +150,7 @@ export function checkDist(root) {
       const isCode = /\.m?js$/i.test(file);
       for (const url of findExternalUrls(text)) {
         if (isNotice && NOTICE_ALLOWED_URLS.has(url)) continue;
+        if (JS_FILE.test(file) && XML_NAMESPACE_URLS.has(url)) continue;
         if (isCode && CODE_ALLOWED_URLS.has(url)) continue;
         failures.push(`${rel}: external URL ${url}`);
       }
