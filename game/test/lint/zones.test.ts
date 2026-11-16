@@ -57,7 +57,8 @@ describe.each(ZONES.map((z) => [z.name, z] as const))('zone %s', (_name, zone) =
     });
   }
 
-  const props = zone.forbiddenProperties.map((p) => `${p.object}.${p.property}`);
+  // A property-only ban (no `object`) is rendered on an arbitrary receiver (SD-A-5).
+  const props = zone.forbiddenProperties.map((p) => `${p.object ?? 'x'}.${p.property}`);
   if (props.length > 0) {
     it.each(props)('forbids %s', async (expr) => {
       expect(
@@ -201,5 +202,251 @@ describe('one zone per directory', () => {
   it.each(dirs)('src/%s', (dir) => {
     const hit = ZONES.filter((z) => matches(z, `src/${dir}/__probe__.ts`)).map((z) => z.name);
     expect(hit).toHaveLength(1);
+  });
+});
+
+// Hand-pinned player-movement canaries (security-design-player-movement, zone data).
+describe('player and input zones (SD-P-1 to SD-P-3, hand-pinned)', () => {
+  it('src/player can no longer import @sz/nav (the old L1 allowance is gone)', async () => {
+    expect(await ruleHits(importOf('@sz/nav'), 'src/player/x.ts', 'no-restricted-imports')).toBe(1);
+  });
+
+  it('input DOM code cannot reach past the ports (defaultView), but may read pointerLockElement', async () => {
+    const file = 'src/input/dom/x.ts';
+    const reach =
+      'export const f = (deps: { doc: { defaultView: unknown } }) => deps.doc.defaultView;\n';
+    const ok =
+      'export const f = (deps: { doc: { pointerLockElement: unknown } }) => deps.doc.pointerLockElement;\n';
+    expect(await ruleHits(reach, file, 'no-restricted-syntax')).toBe(1);
+    expect(await ruleHits(ok, file, 'no-restricted-syntax')).toBe(0);
+  });
+
+  it('the input core takes plain values, not DOM types', async () => {
+    const code = 'export const f = (e: KeyboardEvent) => e;\n';
+    expect(await ruleHits(code, 'src/input/core/x.ts', 'no-restricted-syntax')).toBe(1);
+    expect(await ruleHits(code, 'src/input/dom/x.ts', 'no-restricted-syntax')).toBe(0);
+  });
+
+  it('bot-ai still cannot import @sz/player (no-cheat unchanged)', async () => {
+    expect(await ruleHits(importOf('@sz/player'), 'src/ai/x.ts', 'no-restricted-imports')).toBe(1);
+  });
+
+  it('player code must use Number.isFinite, not the coercing global', async () => {
+    const file = 'src/player/x.ts';
+    expect(await ruleHits('export const a = isFinite(1);\n', file, 'no-restricted-globals')).toBe(
+      1,
+    );
+    expect(
+      await ruleHits('export const a = Number.isFinite(1);\n', file, 'no-restricted-globals'),
+    ).toBe(0);
+  });
+
+  it.each([
+    "import { stepMovement } from '@sz/player';\nexport const a = stepMovement;\n",
+    "import { type PlayerInputIntent } from '@sz/player';\nexport type A = PlayerInputIntent;\n",
+    "export { stepMovement } from '@sz/player';\n",
+    "export * from '@sz/player';\n",
+    "export const p = import('@sz/player');\n",
+  ])('input forbids value use of @sz/player: %s', async (code) => {
+    expect(await ruleHits(code, 'src/input/dom/x.ts', 'no-restricted-syntax')).toBe(1);
+    expect(await ruleHits(code, 'src/input/core/x.ts', 'no-restricted-syntax')).toBe(1);
+  });
+
+  it('input allows whole-declaration type imports and type re-exports of @sz/player', async () => {
+    const code =
+      "import type { PlayerInputIntent } from '@sz/player';\nexport type { MoveAxes } from '@sz/player';\nexport type A = PlayerInputIntent;\n";
+    expect(await ruleHits(code, 'src/input/dom/x.ts', 'no-restricted-syntax')).toBe(0);
+    expect(await ruleHits(code, 'src/input/dom/x.ts', 'no-restricted-imports')).toBe(0);
+  });
+
+  it('input DOM code may import its own core; the core may not import the DOM side', async () => {
+    expect(
+      await ruleHits(
+        importOf('@sz/input/core/state'),
+        'src/input/dom/x.ts',
+        'no-restricted-imports',
+      ),
+    ).toBe(0);
+    expect(
+      await ruleHits(
+        importOf('@sz/input/dom/bind'),
+        'src/input/core/x.ts',
+        'no-restricted-imports',
+      ),
+    ).toBe(1);
+  });
+
+  it.each(['src/player/movement.ts', 'src/input/dom/bind.ts', 'src/input/core/state.ts'])(
+    '%s is matched by exactly one zone',
+    async (file) => {
+      const real = new ESLint({ cwd: ROOT });
+      const matched = ZONES.filter(
+        (z) =>
+          z.files.some((g) => file.startsWith(g.replace('**', ''))) &&
+          !(z.ignores ?? []).some((g) => file.startsWith(g.replace('**', ''))),
+      );
+      expect(matched.map((z) => z.name)).toHaveLength(1);
+      expect(await real.isPathIgnored(join(ROOT, file))).toBe(false);
+    },
+  );
+});
+
+// game-audio zones (security-design-game-audio SD-A-1, SD-A-5, SD-A-8). Hand-pinned.
+describe('audio zones', () => {
+  const adapter = 'src/audio/web/__canary__.ts';
+  const core = 'src/audio/core/__canary__.ts';
+
+  it('SD-A-8: core rejects fetch, decodeAudioData, Math.random and console.warn together', async () => {
+    const code = [
+      "export const a = fetch('x');",
+      'export const b = x.decodeAudioData();',
+      'export const c = Math.random();',
+      "console.warn('x');",
+    ].join('\n');
+    expect(await ruleHits(code, core, 'no-restricted-globals')).toBe(2); // fetch, console
+    expect(await ruleHits(code, core, 'no-restricted-properties')).toBe(2);
+  });
+
+  it('SD-A-8: core may not import the audio barrel or the web adapter', async () => {
+    expect(await ruleHits(importOf('@sz/audio'), core, 'no-restricted-imports')).toBe(1);
+    expect(await ruleHits(importOf('@sz/audio/web/params'), core, 'no-restricted-imports')).toBe(1);
+    expect(await ruleHits(importOf('@sz/kernel'), core, 'no-restricted-imports')).toBe(0);
+  });
+
+  it('the adapter may use globalThis, setTimeout and console.warn, but not console.error', async () => {
+    const code = [
+      'export const g = globalThis.AudioContext;',
+      'setTimeout(() => undefined, 0);',
+      "console.warn('x');",
+    ].join('\n');
+    expect(await ruleHits(code, adapter, 'no-restricted-globals')).toBe(0);
+    expect(await ruleHits(code, adapter, 'no-restricted-properties')).toBe(0);
+    expect(await ruleHits("console.error('x');\n", adapter, 'no-restricted-properties')).toBe(1);
+  });
+
+  it.each([
+    'p.value = 1;',
+    'p.gain.value = 0.5;',
+    'p.setValueAtTime(0, 1);',
+    'p.setTargetAtTime(0, 1, 0.1);',
+    'p.linearRampToValueAtTime(0, 1);',
+    'p.exponentialRampToValueAtTime(1, 1);',
+    'p.setValueCurveAtTime(c, 0, 1);',
+    'l.setPosition(0, 0, 0);',
+    'l.setOrientation(0, 0, -1, 0, 1, 0);',
+  ])('SD-A-1: `%s` is banned outside params.ts (adapter and core)', async (stmt) => {
+    const code = `declare const p: any; declare const l: any; declare const c: any;\n${stmt}\n`;
+    expect(await ruleHits(code, adapter, 'no-restricted-syntax')).toBe(1);
+    expect(await ruleHits(code, core, 'no-restricted-syntax')).toBe(1);
+  });
+
+  it('reading .value and other assignments stay allowed', async () => {
+    const code = 'declare const p: any;\nexport const v = p.value;\np.buffer = 1;\n';
+    expect(await ruleHits(code, adapter, 'no-restricted-syntax')).toBe(0);
+  });
+
+  // src/input now bans these globals (SEC-P-16); it reaches the DOM only through injected ports.
+  it('diagnostics keeps window and navigator', async () => {
+    const code = 'export const w = window;\nexport const n = navigator;\n';
+    expect(await ruleHits(code, 'src/diagnostics/a.ts', 'no-restricted-globals')).toBe(0);
+    expect(await ruleHits(code, adapter, 'no-restricted-globals')).toBe(2);
+  });
+});
+
+// Hand-pinned: weapons-combat boundary (SEC-WC-12, SEC-WC-21, SEC-WC-22, ADR-WC-8).
+describe('weapons and combat zones (hand-pinned)', () => {
+  const dirs = ['src/weapons/__canary__.ts', 'src/combat/__canary__.ts'];
+
+  it.each(dirs)('%s bans console, fetch, timers, Date and Math.random', async (file) => {
+    expect(await ruleHits("console.error('x');\n", file, 'no-restricted-globals')).toBe(1);
+    expect(await ruleHits("export const f = fetch('x');\n", file, 'no-restricted-globals')).toBe(1);
+    expect(
+      await ruleHits('export const t = setTimeout(() => 0, 1);\n', file, 'no-restricted-globals'),
+    ).toBe(1);
+    expect(await ruleHits('export const d = Date.now();\n', file, 'no-restricted-globals')).toBe(1);
+    expect(
+      await ruleHits('export const r = Math.random();\n', file, 'no-restricted-properties'),
+    ).toBe(1);
+  });
+
+  it('weapons imports only the kernel: @sz/combat and @sz/nav fail, @sz/kernel passes', async () => {
+    const file = 'src/weapons/tick-weapon.ts';
+    expect(await ruleHits(importOf('@sz/combat'), file, 'no-restricted-imports')).toBe(1);
+    expect(await ruleHits(importOf('@sz/nav'), file, 'no-restricted-imports')).toBe(1);
+    expect(await ruleHits(importOf('@sz/kernel'), file, 'no-restricted-imports')).toBe(0);
+    expect(await ruleHits(importOf('./spread'), file, 'no-restricted-imports')).toBe(0);
+  });
+
+  it('combat imports only the kernel and weapons, never deep paths', async () => {
+    const file = 'src/combat/resolve-shot.ts';
+    expect(await ruleHits(importOf('@sz/weapons'), file, 'no-restricted-imports')).toBe(0);
+    expect(await ruleHits(importOf('@sz/weapons/guards'), file, 'no-restricted-imports')).toBe(1);
+    expect(await ruleHits(importOf('@sz/physics'), file, 'no-restricted-imports')).toBe(1);
+  });
+
+  it('bot-ai may import @sz/weapons but still never @sz/combat', async () => {
+    const file = 'src/ai/brain.ts';
+    expect(await ruleHits(importOf('@sz/weapons'), file, 'no-restricted-imports')).toBe(0);
+    expect(await ruleHits(importOf('@sz/combat'), file, 'no-restricted-imports')).toBe(1);
+  });
+});
+
+// ADR-WC-7: every src/<dir> matches exactly one zone, so zone order never matters and a new
+// directory cannot fall outside every zone.
+describe('zone coverage (ADR-WC-7)', () => {
+  const PLANNED = [
+    'kernel',
+    'maps',
+    'nav',
+    'player',
+    'weapons',
+    'combat',
+    'stats',
+    'ai',
+    'ai/perception',
+    'sim',
+    'round',
+    'physics',
+    'render',
+    'assets',
+    'ui',
+    'input',
+    'audio',
+    'diagnostics',
+    'persistence',
+    'app',
+  ];
+
+  function underGlob(glob: string, file: string): boolean {
+    if (!glob.endsWith('/**')) throw new Error(`unsupported zone glob ${glob}`);
+    return file.startsWith(glob.slice(0, -2));
+  }
+
+  function zonesFor(file: string): string[] {
+    return ZONES.filter(
+      (z) =>
+        z.files.some((g) => underGlob(g, file)) &&
+        !(z.ignores ?? []).some((g) => underGlob(g, file)),
+    ).map((z) => z.name);
+  }
+
+  it('every zone glob has the src/<dir>/** shape', () => {
+    for (const z of ZONES)
+      for (const g of [...z.files, ...(z.ignores ?? [])]) {
+        expect(g).toMatch(/^src\/[a-z/]+\/\*\*$/);
+      }
+  });
+
+  const onDisk = readdirSync(join(ROOT, 'src'), { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
+
+  it.each([...new Set([...PLANNED, ...onDisk])])('src/%s matches exactly one zone', (dir) => {
+    expect(zonesFor(`src/${dir}/__probe__.ts`)).toHaveLength(1);
+  });
+
+  it('weapons and combat are in their own zones', () => {
+    expect(zonesFor('src/weapons/x.ts')).toEqual(['weapons (L1)']);
+    expect(zonesFor('src/combat/x.ts')).toEqual(['combat (L1)']);
   });
 });

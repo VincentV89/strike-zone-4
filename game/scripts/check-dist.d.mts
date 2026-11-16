@@ -6,3 +6,4 @@ export declare function checkDist(root: string): string[];
 export declare const NOTICE_PATTERN: RegExp;
 export declare const NOTICE_ALLOWED_URLS: ReadonlySet<string>;
 export declare function needsRapierNotice(root: string): boolean;
+export declare const AUDIO_FILE_EXTENSIONS: RegExp;

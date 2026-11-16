@@ -117,6 +117,250 @@ const PHYSICS_PROPERTIES = [
   })),
 ];
 
+// ---- player-movement zones (security-design-player-movement SD-P-1 to SD-P-3) ----
+
+const named = (names, message) => names.map((name) => ({ name, message: `${message} (${name})` }));
+
+/** Output, timer and escape-hatch globals banned in player and input code (SEC-P-14 to SEC-P-16). */
+const NO_IO_GLOBAL_NAMES = [
+  'console',
+  'fetch',
+  'XMLHttpRequest',
+  'WebSocket',
+  'EventSource',
+  'Worker',
+  'SharedWorker',
+  'BroadcastChannel',
+  'Image',
+  'setTimeout',
+  'setInterval',
+  'setImmediate',
+  'queueMicrotask',
+  'requestIdleCallback',
+  'globalThis',
+  'self',
+  'top',
+  'parent',
+  'frames',
+  'isFinite',
+  'isNaN',
+];
+
+const PLAYER_GLOBALS = [
+  ...PURE_GLOBALS,
+  ...named(
+    [...NO_IO_GLOBAL_NAMES, 'eval'],
+    'SD-P-4/SEC-P-15: player code has no I/O, timers or coercing globals; use Number.isFinite',
+  ),
+];
+
+/** DOM handles reach src/input only through createInput(deps) (SD-P-3). */
+const INPUT_GLOBALS = named(
+  [
+    'window',
+    'document',
+    'navigator',
+    'localStorage',
+    'sessionStorage',
+    'indexedDB',
+    'caches',
+    'location',
+    'postMessage',
+    'requestAnimationFrame',
+    'Date',
+    'crypto',
+    ...NO_IO_GLOBAL_NAMES,
+  ],
+  'SEC-P-16: input uses only injected DOM ports, never globals, storage, network or console',
+);
+
+const INPUT_SAMPLES = [
+  'three',
+  '@dimforge/rapier3d-compat',
+  '@sz/sim',
+  '@sz/nav',
+  '@sz/weapons',
+  '@sz/kernel/rng',
+  '@sz/player/movement',
+  'node:fs',
+];
+
+/** SD-P-2: input may see @sz/player only through whole-declaration `import type`. */
+const PLAYER_TYPE_ONLY = [
+  {
+    selector: "ImportDeclaration[source.value='@sz/player'][importKind!='type']",
+    message: 'SD-P-2: import @sz/player with `import type { ... }` only.',
+  },
+  {
+    selector: "ExportNamedDeclaration[source.value='@sz/player'][exportKind!='type']",
+    message: 'SD-P-2: re-export @sz/player types only.',
+  },
+  {
+    selector: "ExportAllDeclaration[source.value='@sz/player']",
+    message: 'SD-P-2: no export-all from @sz/player.',
+  },
+  {
+    selector: "ImportExpression[source.value='@sz/player']",
+    message: 'SD-P-2: no dynamic import of @sz/player.',
+  },
+];
+
+/** SD-P-3: members that reach past the narrow ports to the network or the wider DOM. */
+const DOM_ESCAPE_MEMBERS = {
+  selector:
+    'MemberExpression[property.name=/^(defaultView|ownerDocument|createElement|sendBeacon|cookie|location|parentElement|getRootNode)$/]',
+  message: 'SD-P-3: input may use only the members declared in src/input/dom/ports.ts.',
+};
+
+const PLAYER_INPUT_ZONES = [
+  {
+    name: 'player (L1)',
+    files: ['src/player/**'],
+    forbiddenImportPatterns: [
+      imp('^(?!@sz/kernel$)[^.]', 'BR-P-01: src/player imports only @sz/kernel.', [
+        'three',
+        '@dimforge/rapier3d-compat',
+        '@sz/sim',
+        '@sz/nav',
+        '@sz/weapons',
+        '@sz/kernel/rng',
+        '@sz/input',
+        'node:fs',
+      ]),
+    ],
+    allowed: ['@sz/kernel', './motion'],
+    forbiddenGlobals: PLAYER_GLOBALS,
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: [],
+  },
+  {
+    name: 'input (L3)',
+    files: ['src/input/**'],
+    ignores: ['src/input/core/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!(@sz/(kernel|player)|@sz/input/core/[a-z-]+)$)[^.]',
+        'SD-P-1: src/input imports only @sz/kernel, @sz/player types and its own core.',
+        [...INPUT_SAMPLES, '@sz/input', '@sz/input/dom/bind'],
+      ),
+    ],
+    allowed: ['@sz/kernel', '@sz/player', '@sz/input/core/state', './lock'],
+    forbiddenGlobals: INPUT_GLOBALS,
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: [...PLAYER_TYPE_ONLY, DOM_ESCAPE_MEMBERS],
+  },
+  {
+    name: 'input core (L3-pure)',
+    files: ['src/input/core/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!@sz/(kernel|player)$)[^.]',
+        'SD-P-1: the input core imports only @sz/kernel and @sz/player types.',
+        [...INPUT_SAMPLES, '@sz/input/dom/bind'],
+      ),
+    ],
+    allowed: ['@sz/kernel', '@sz/player', './bindings'],
+    forbiddenGlobals: [
+      ...INPUT_GLOBALS,
+      { name: 'performance', message: 'SEC-P-16: the input core is pure (performance).' },
+    ],
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: [
+      ...PLAYER_TYPE_ONLY,
+      DOM_ESCAPE_MEMBERS,
+      {
+        selector:
+          'TSTypeReference[typeName.name=/^(Event|KeyboardEvent|MouseEvent|WheelEvent|EventTarget|Document|Window|Element|HTMLElement)$/]',
+        message: 'SD-P-3: the input core takes plain values, not DOM types.',
+      },
+    ],
+  },
+];
+
+// ---- game-audio zones (security-design-game-audio SD-A-1, SD-A-5, SD-A-8) ----
+
+const AUDIO_IMPORTS = [THREE, RAPIER, APP, KERNEL_DEEP];
+
+const AUDIO_GLOBALS = [
+  ...STORAGE_GLOBALS,
+  ...[
+    'fetch',
+    'XMLHttpRequest',
+    'Audio',
+    'HTMLAudioElement',
+    'OfflineAudioContext',
+    'navigator',
+    'window',
+    'document',
+  ].map((name) => ({ name, message: `SEC-A-02: ${name} is not allowed in audio.` })),
+  ...['isFinite', 'isNaN'].map((name) => ({
+    name,
+    message: `SD-A-2: ${name} coerces. Use Number.${name}.`,
+  })),
+];
+
+const AUDIO_PROPERTIES = [
+  ...[
+    'decodeAudioData',
+    'addModule',
+    'getUserMedia',
+    'createMediaStreamSource',
+    'createMediaElementSource',
+    'createScriptProcessor',
+  ].map((property) => ({ property, message: `SEC-A-02: ${property} is not allowed in audio.` })),
+  ...['error', 'log', 'info', 'debug', 'trace'].map((property) => ({
+    object: 'console',
+    property,
+    message: 'SD-A-7: audio logs only through warnOnce (console.warn).',
+  })),
+];
+
+const AUDIO_PARAM_METHODS =
+  'setValueAtTime|setTargetAtTime|linearRampToValueAtTime|exponentialRampToValueAtTime|setValueCurveAtTime|setPosition|setOrientation';
+
+/** SD-A-1: AudioParam writes only through src/audio/web/params.ts (finite-guarded). */
+const AUDIO_PARAM_SYNTAX = [
+  {
+    selector: "AssignmentExpression > MemberExpression.left[property.name='value']",
+    message: 'SD-A-1: write AudioParams through setParam in src/audio/web/params.ts.',
+  },
+  {
+    selector: `CallExpression[callee.property.name=/^(${AUDIO_PARAM_METHODS})$/]`,
+    message: 'SD-A-1: schedule AudioParams through src/audio/web/params.ts.',
+  },
+];
+
+/** Later entries with the same name are dropped, so a canary sees each global once. */
+function uniqueByName(entries) {
+  const seen = new Set();
+  return entries.filter((e) => {
+    if (seen.has(e.name)) return false;
+    seen.add(e.name);
+    return true;
+  });
+}
+
+/**
+ * weapons and combat only (ADR-WC-8): no console, network, workers or timers. Time enters as
+ * ctx.now and ctx.dt. The shared lists for other zones are unchanged (residual risk R-6).
+ */
+const UNIT_GLOBALS = [
+  ...PURE_GLOBALS,
+  ...[
+    'console',
+    'fetch',
+    'XMLHttpRequest',
+    'WebSocket',
+    'Worker',
+    'setTimeout',
+    'setInterval',
+    'queueMicrotask',
+  ].map((name) => ({
+    name,
+    message: `SEC-WC-22/ADR-WC-8: ${name} is not allowed in weapons or combat.`,
+  })),
+];
+
 /** @type {ReadonlyArray<Zone>} */
 export const ZONES = [
   {
@@ -143,10 +387,60 @@ export const ZONES = [
   },
   {
     name: 'domain (L1)',
-    files: ['src/player/**', 'src/weapons/**', 'src/combat/**', 'src/stats/**'],
+    files: ['src/stats/**'],
     forbiddenImportPatterns: L1_IMPORTS,
     allowed: ['@sz/kernel', '@sz/nav'],
     forbiddenGlobals: PURE_GLOBALS,
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: [],
+  },
+  {
+    // ADR-WC-7: own zone, not in domain (L1), so no file matches two zones. One pattern bans
+    // every non-relative import except @sz/kernel; it subsumes L1_IMPORTS (which would
+    // otherwise report a second time for the same import).
+    name: 'weapons (L1)',
+    files: ['src/weapons/**'],
+    forbiddenImportPatterns: [
+      imp('^(?!@sz/kernel$)[^.]', 'SEC-WC-21: weapons imports only @sz/kernel.', [
+        '@sz/combat',
+        '@sz/player',
+        '@sz/nav',
+        '@sz/weapons',
+        '@sz/kernel/rng',
+        '@sz/sim',
+        '@sz/physics',
+        'three',
+        '@dimforge/rapier3d-compat',
+        'gl-matrix',
+      ]),
+    ],
+    allowed: ['@sz/kernel', './weapon-table'],
+    forbiddenGlobals: UNIT_GLOBALS,
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: [],
+  },
+  {
+    name: 'combat (L1)',
+    files: ['src/combat/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!@sz/(kernel|weapons)$)[^.]',
+        'SEC-WC-21: combat imports only @sz/kernel and @sz/weapons.',
+        [
+          '@sz/player',
+          '@sz/physics',
+          '@sz/nav',
+          '@sz/ai',
+          '@sz/sim',
+          '@sz/weapons/weapon-table',
+          '@sz/kernel/rng',
+          'three',
+          '@dimforge/rapier3d-compat',
+        ],
+      ),
+    ],
+    allowed: ['@sz/kernel', '@sz/weapons', './guards'],
+    forbiddenGlobals: UNIT_GLOBALS,
     forbiddenProperties: PURE_PROPERTIES,
     forbiddenSyntax: [],
   },
@@ -178,7 +472,7 @@ export const ZONES = [
         ['@sz/player', '@sz/combat/damage'],
       ),
     ],
-    allowed: ['@sz/kernel', '@sz/ai/perception', '@sz/nav'],
+    allowed: ['@sz/kernel', '@sz/ai/perception', '@sz/nav', '@sz/weapons'],
     forbiddenGlobals: PURE_GLOBALS,
     forbiddenProperties: PURE_PROPERTIES,
     forbiddenSyntax: [],
@@ -314,13 +608,51 @@ export const ZONES = [
     forbiddenSyntax: [],
   },
   {
-    name: 'input, audio, diagnostics (L3)',
-    files: ['src/input/**', 'src/audio/**', 'src/diagnostics/**'],
+    name: 'diagnostics (L3)',
+    files: ['src/diagnostics/**'],
     forbiddenImportPatterns: [THREE, RAPIER, APP, KERNEL_DEEP],
     allowed: ['@sz/kernel'],
     forbiddenGlobals: STORAGE_GLOBALS,
     forbiddenProperties: [],
     forbiddenSyntax: [],
+  },
+  ...PLAYER_INPUT_ZONES,
+  {
+    name: 'audio adapter (L3)',
+    files: ['src/audio/**'],
+    forbiddenImportPatterns: AUDIO_IMPORTS,
+    allowed: ['@sz/kernel'],
+    forbiddenGlobals: AUDIO_GLOBALS,
+    forbiddenProperties: AUDIO_PROPERTIES,
+    forbiddenSyntax: AUDIO_PARAM_SYNTAX,
+  },
+  {
+    // Must come after the adapter zone: it repeats every adapter entry (flat config replaces arrays).
+    name: 'audio core (L3-pure)',
+    files: ['src/audio/core/**'],
+    forbiddenImportPatterns: [
+      ...AUDIO_IMPORTS,
+      imp('^@sz/audio(/|$)', 'BR-A-50: audio core never imports the audio barrel or web adapter.', [
+        '@sz/audio',
+        '@sz/audio/web/adapter',
+      ]),
+    ],
+    allowed: ['@sz/kernel', './dsp'],
+    forbiddenGlobals: uniqueByName([
+      ...AUDIO_GLOBALS,
+      ...PURE_GLOBALS,
+      ...[
+        'globalThis',
+        'console',
+        'setTimeout',
+        'setInterval',
+        'AudioContext',
+        'webkitAudioContext',
+        'AudioBuffer',
+      ].map((name) => ({ name, message: `BR-A-50: ${name} is not allowed in audio core.` })),
+    ]),
+    forbiddenProperties: [...AUDIO_PROPERTIES, ...PURE_PROPERTIES],
+    forbiddenSyntax: AUDIO_PARAM_SYNTAX,
   },
   {
     name: 'persistence (L3)',
@@ -335,7 +667,7 @@ export const ZONES = [
     name: 'app-shell (L4)',
     files: ['src/app/**'],
     forbiddenImportPatterns: [KERNEL_DEEP],
-    allowed: ['@sz/kernel', '@sz/round', '@sz/render', 'three'],
+    allowed: ['@sz/kernel', '@sz/round', '@sz/render', 'three', '@sz/player', '@sz/input'],
     forbiddenGlobals: STORAGE_GLOBALS,
     forbiddenProperties: [],
     forbiddenSyntax: [],
@@ -351,12 +683,16 @@ export const ZONES = [
  *   forbiddenImportPatterns: ReadonlyArray<ImportPattern>,
  *   allowed: ReadonlyArray<string>,
  *   forbiddenGlobals: ReadonlyArray<{ name: string, message: string }>,
- *   forbiddenProperties: ReadonlyArray<{ object: string, property: string, message: string }>,
+ *   forbiddenProperties: ReadonlyArray<{ object?: string, property: string, message: string }>,
  *   forbiddenSyntax: ReadonlyArray<{ selector: string, message: string }>,
  * }} Zone
  */
 
 const stripSamples = ({ regex, message }) => ({ regex, message });
+
+/** Property-only bans (no `object`) must omit the key: ESLint's schema may reject undefined. */
+const propertyOption = ({ object, property, message }) =>
+  object === undefined ? { property, message } : { object, property, message };
 
 /** Maps one zone to a flat-config object, concatenating the shared entries (SD-K-2). */
 export function zoneConfig(zone) {
@@ -370,7 +706,7 @@ export function zoneConfig(zone) {
         { patterns: [...SHARED_IMPORTS, ...zone.forbiddenImportPatterns].map(stripSamples) },
       ],
       'no-restricted-globals': ['error', ...zone.forbiddenGlobals],
-      'no-restricted-properties': ['error', ...zone.forbiddenProperties],
+      'no-restricted-properties': ['error', ...zone.forbiddenProperties.map(propertyOption)],
       'no-restricted-syntax': ['error', ...SHARED_SYNTAX, ...zone.forbiddenSyntax],
     },
   };

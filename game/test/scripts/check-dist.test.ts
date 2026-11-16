@@ -107,4 +107,16 @@ describe('check-dist (SD-K-3)', () => {
       ]);
     });
   });
+
+  it('SEC-A-10: fails on audio files in dist (BR-A-60)', () => {
+    const root = makeRoot({
+      'dist/index.html': GOOD_INDEX,
+      'dist/assets/shot-abc.wav': 'RIFF',
+      'dist/assets/music.MP3': 'ID3',
+    });
+    expect(checkDist(root).sort()).toEqual([
+      'dist/assets/music.MP3: audio file in dist (BR-A-60)',
+      'dist/assets/shot-abc.wav: audio file in dist (BR-A-60)',
+    ]);
+  });
 });
