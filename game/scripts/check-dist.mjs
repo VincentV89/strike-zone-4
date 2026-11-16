@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url';
 
 const TEXT_EXTENSIONS = /\.(html|js|mjs|css|json|svg|txt|map)$/i;
 
+/** SEC-A-10 / BR-A-60: every sound is synthesised at boot, so no audio file may ship. */
+export const AUDIO_FILE_EXTENSIONS = /\.(wav|mp3|ogg|m4a|flac|webm|aac)$/i;
+
 /** Removes /*! ... *\/ licence banners and sourceMappingURL lines before the URL scan. */
 export function stripAllowedUrlContext(text) {
   return text.replace(/\/\*![\s\S]*?\*\//g, '').replace(/^\s*\/\/# sourceMappingURL=.*$/gm, '');
@@ -51,6 +54,10 @@ export function checkDist(root) {
   }
   if (existsSync(dist)) {
     for (const file of listFiles(dist)) {
+      if (AUDIO_FILE_EXTENSIONS.test(file)) {
+        failures.push(`${relative(root, file)}: audio file in dist (BR-A-60)`);
+        continue;
+      }
       if (!TEXT_EXTENSIONS.test(file)) continue;
       for (const url of findExternalUrls(readFileSync(file, 'utf8'))) {
         failures.push(`${relative(root, file)}: external URL ${url}`);
