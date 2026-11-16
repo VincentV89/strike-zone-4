@@ -32,6 +32,9 @@ export default defineConfig({
         lines: 80,
         'src/kernel/**': { lines: 95, branches: 90 },
         'src/audio/core/**': { lines: 90, branches: 85 },
+        // ADR-WC-2: weapons-combat logic, same bar as the kernel.
+        'src/weapons/**': { lines: 95, branches: 90 },
+        'src/combat/**': { lines: 95, branches: 90 },
       },
     },
   },
