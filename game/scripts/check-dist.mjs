@@ -121,6 +121,32 @@ function listFiles(dir) {
   return out;
 }
 
+/** PD-AS-13 / NFR-AS-P8: hard gate on the gzipped JS and CSS shipped under dist/assets. */
+export const BUNDLE_GZIP_LIMIT = 2_500_000;
+
+/** Gzip sizes of dist/assets/*.js|*.mjs|*.css, largest first, plus their total. */
+export function bundleGzipBytes(root) {
+  const assets = join(root, 'dist', 'assets');
+  if (!existsSync(assets)) return { total: 0, files: [] };
+  const files = readdirSync(assets)
+    .filter((n) => /\.(m?js|css)$/i.test(n))
+    .map((name) => ({ name, gzip: gzipSync(readFileSync(join(assets, name))).length }))
+    .sort((a, b) => b.gzip - a.gzip || a.name.localeCompare(b.name));
+  return { total: files.reduce((sum, f) => sum + f.gzip, 0), files };
+}
+
+function checkBundleSize(root, failures) {
+  const { total, files } = bundleGzipBytes(root);
+  if (total <= BUNDLE_GZIP_LIMIT) return;
+  const largest = files
+    .slice(0, 3)
+    .map((f) => `${f.name} ${f.gzip} B`)
+    .join(', ');
+  failures.push(
+    `dist/assets: ${total} B gzip exceeds the ${BUNDLE_GZIP_LIMIT} B budget (NFR-AS-P8); largest: ${largest}`,
+  );
+}
+
 /** Returns a list of human-readable failures for the package at `root`. */
 export function checkDist(root) {
   const failures = [];
@@ -162,6 +188,7 @@ export function checkDist(root) {
     const deps = runtimeDependencies(root);
     const needles = deps.flatMap((d) => NOTICE_REQUIREMENTS.get(d) ?? []);
     if (needles.length > 0) checkNotice(dist, failures, needles);
+    checkBundleSize(root, failures);
   }
   const pub = join(root, 'public');
   if (existsSync(pub) && readdirSync(pub).length > 0) {
@@ -187,6 +214,10 @@ export function sizeReport(root) {
     lines.push(`check:dist size ${name}: ${buf.length} B raw, ${g} B gzip`);
   }
   lines.push(`check:dist size total: ${raw} B raw, ${gz} B gzip (advisory)`);
+  const bundle = bundleGzipBytes(root);
+  lines.push(
+    `check:dist bundle gate: ${bundle.total} B gzip of ${BUNDLE_GZIP_LIMIT} B (js + css, NFR-AS-P8)`,
+  );
   return lines;
 }
 

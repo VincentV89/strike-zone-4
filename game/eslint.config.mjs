@@ -1,7 +1,14 @@
 // ESLint 9 flat config for the game package (team-practices Code Style, BR-K-54, SD-K-2).
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
-import { SHARED_SYNTAX, SRC_BASE, ZONES, zoneConfig } from './eslint.zones.mjs';
+import {
+  APP_OVERRIDES,
+  SHARED_SYNTAX,
+  SRC_BASE,
+  ZONES,
+  overrideConfig,
+  zoneConfig,
+} from './eslint.zones.mjs';
 
 const CONFIG_FILES = [
   'eslint.config.mjs',
@@ -38,6 +45,8 @@ export default tseslint.config(
   },
   SRC_BASE,
   ...ZONES.map(zoneConfig),
+  // SD-AS-1: generated per-file exceptions; they follow the zones so they win.
+  ...APP_OVERRIDES.map(overrideConfig),
   {
     files: ['test/**/*.ts'],
     rules: {

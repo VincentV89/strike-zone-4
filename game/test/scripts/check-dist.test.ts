@@ -2,7 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { gzipSync } from 'node:zlib';
 import {
+  BUNDLE_GZIP_LIMIT,
+  bundleGzipBytes,
   checkDist,
   findDynamicCode,
   findExternalUrls,
@@ -236,10 +239,72 @@ describe('check-dist (SD-K-3)', () => {
         'dist/assets/a.js': 'y',
       });
       const lines = sizeReport(root);
-      expect(lines).toHaveLength(3);
+      // The fourth line is the app-shell bundle gate (PD-AS-13).
+      expect(lines).toHaveLength(4);
       expect(lines[0]).toMatch(/^check:dist size a\.js: 1 B raw, \d+ B gzip$/);
       expect(lines[2]).toMatch(/total: 5 B raw/);
+      expect(lines[3]).toMatch(/^check:dist bundle gate: \d+ B gzip of 2500000 B/);
       expect(sizeReport(makeRoot({}))).toEqual([]);
     });
+  });
+});
+
+// PD-AS-13 / NFR-AS-P8: the 2.5 MB gzip gate over dist/assets js + css.
+describe('bundle gzip gate (app-shell)', () => {
+  /** Seeded incompressible bytes whose gzip size is exactly `target`. */
+  function bytesWithGzip(target: number): Buffer {
+    const rand = (n: number): Buffer => {
+      let seed = 12345;
+      const b = Buffer.alloc(n);
+      for (let i = 0; i < n; i++) {
+        seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+        b[i] = seed >>> 24;
+      }
+      return b;
+    };
+    let len = target;
+    for (let i = 0; i < 20; i++) {
+      const buf = rand(len);
+      const g = gzipSync(buf).length;
+      if (g === target) return buf;
+      len += target - g;
+    }
+    throw new Error('could not hit the gzip target');
+  }
+
+  function rootWithBundle(jsGzip: number): string {
+    const root = makeRoot({ 'dist/index.html': GOOD_INDEX, 'dist/assets/s.css': 'a{}' });
+    writeFileSync(join(root, 'dist/assets/big.js'), bytesWithGzip(jsGzip));
+    return root;
+  }
+
+  const index = { 'dist/index.html': GOOD_INDEX };
+  const gateFailures = (root: string) => checkDist(root).filter((f) => f.includes('NFR-AS-P8'));
+
+  it('passes at the limit and fails one byte over, naming the largest files', () => {
+    const css = gzipSync(Buffer.from('a{}')).length;
+    const atLimit = rootWithBundle(BUNDLE_GZIP_LIMIT - css);
+    expect(bundleGzipBytes(atLimit).total).toBe(BUNDLE_GZIP_LIMIT);
+    expect(gateFailures(atLimit)).toEqual([]);
+    const over = rootWithBundle(BUNDLE_GZIP_LIMIT - css + 1);
+    const f = gateFailures(over);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toContain(`${String(BUNDLE_GZIP_LIMIT + 1)} B gzip`);
+    expect(f[0]).toContain('big.js');
+  }, 60_000);
+
+  it('counts js, mjs and css only, largest first, and reports the gate in sizeReport', () => {
+    const root = makeRoot({
+      ...index,
+      'dist/assets/a.js': 'x'.repeat(1000),
+      'dist/assets/b.mjs': 'abcdefghij'.repeat(500),
+      'dist/assets/c.css': 'a{}',
+      'dist/assets/n.txt': 'ignored',
+    });
+    const b = bundleGzipBytes(root);
+    expect(b.files.map((x) => x.name)).toEqual(['b.mjs', 'a.js', 'c.css']);
+    expect(b.total).toBe(b.files.reduce((s, x) => s + x.gzip, 0));
+    expect(sizeReport(root).at(-1)).toContain('bundle gate');
+    expect(bundleGzipBytes(makeRoot({})).total).toBe(0);
   });
 });

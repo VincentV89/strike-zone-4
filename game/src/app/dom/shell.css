@@ -1,0 +1,26 @@
+/*
+ * app-shell layout (SD-AS-6): the full-viewport game canvas under ui's fixed overlay. Imported
+ * from start.ts so Vite hashes it with ui's stylesheet. No inline styles are written anywhere.
+ */
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0b0e12;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+.sz-game-canvas {
+  position: fixed;
+  inset: 0;
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  outline: none;
+}

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { ESLint, type Linter } from 'eslint';
 import tseslint from 'typescript-eslint';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { SHARED_IMPORTS, ZONES, type Zone } from '../../eslint.zones.mjs';
+import { APP_OVERRIDES, SHARED_IMPORTS, ZONES, type Zone } from '../../eslint.zones.mjs';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -345,10 +345,12 @@ describe('audio zones', () => {
     expect(await ruleHits(code, adapter, 'no-restricted-syntax')).toBe(0);
   });
 
-  // src/input now bans these globals (SEC-P-16); it reaches the DOM only through injected ports.
-  it('diagnostics keeps window and navigator', async () => {
+  // src/input bans these globals (SEC-P-16); diagnostics now gets its handles injected too
+  // (security-design-app-shell SD-AS-1), while app-shell DOM glue may read them.
+  it('only app-shell DOM glue may read window and navigator', async () => {
     const code = 'export const w = window;\nexport const n = navigator;\n';
-    expect(await ruleHits(code, 'src/diagnostics/a.ts', 'no-restricted-globals')).toBe(0);
+    expect(await ruleHits(code, 'src/app/dom/a.ts', 'no-restricted-globals')).toBe(0);
+    expect(await ruleHits(code, 'src/diagnostics/dom/a.ts', 'no-restricted-globals')).toBe(2);
     expect(await ruleHits(code, adapter, 'no-restricted-globals')).toBe(2);
   });
 });
@@ -897,6 +899,125 @@ describe('render and assets zones (SD-R-1, hand-pinned)', () => {
       'src/assets/gl/x.ts',
     ]) {
       expect(ZONES.filter((z) => matches(z, rel))).toHaveLength(1);
+    }
+  });
+});
+
+// Hand-pinned app-shell canaries (security-design-app-shell SD-AS-1).
+describe('app-shell and diagnostics zones (hand-pinned)', () => {
+  const dom = 'src/app/dom/start.ts';
+  const core = 'src/app/core/machine.ts';
+  const hook = 'src/diagnostics/dom/hook.ts';
+  const diagCore = 'src/diagnostics/core/probe.ts';
+  const tryCode =
+    'export function f(): number {\n  try {\n    return 1;\n  } catch {\n    return 0;\n  }\n}\n';
+  const consoleError = "console.error('x');\nexport const a = 1;\n";
+
+  it('app-shell never imports bot-ai, weapons, combat, three or Rapier (SEC-AS-01)', async () => {
+    for (const spec of [
+      '@sz/ai',
+      '@sz/combat',
+      '@sz/weapons',
+      'three',
+      '@dimforge/rapier3d-compat',
+    ]) {
+      expect(await ruleHits(importOf(spec), dom, 'no-restricted-imports'), spec).toBe(1);
+    }
+    expect(await ruleHits(importOf('@sz/round'), dom, 'no-restricted-imports')).toBe(0);
+  });
+
+  it('nothing imports @sz/app, diagnostics included (SEC-AS-03)', async () => {
+    for (const file of [hook, diagCore, 'src/ui/dom/mount.ts', 'src/sim/sim.ts']) {
+      expect(await ruleHits(importOf('@sz/app'), file, 'no-restricted-imports'), file).toBe(1);
+    }
+  });
+
+  it('console.error only in report.ts; try only in storage, loop and boot', async () => {
+    expect(await ruleHits(consoleError, 'src/app/dom/report.ts', 'no-restricted-properties')).toBe(
+      0,
+    );
+    expect(await ruleHits(consoleError, dom, 'no-restricted-properties')).toBe(1);
+    for (const f of ['storage', 'loop', 'boot']) {
+      expect(await ruleHits(tryCode, `src/app/dom/${f}.ts`, 'no-restricted-syntax'), f).toBe(0);
+    }
+    expect(await ruleHits(tryCode, dom, 'no-restricted-syntax')).toBe(1);
+    expect(await ruleHits(tryCode, 'src/app/dom/report.ts', 'no-restricted-syntax')).toBe(1);
+    expect(await ruleHits(consoleError, 'src/app/dom/loop.ts', 'no-restricted-properties')).toBe(1);
+  });
+
+  it('the overrides keep every other app-shell rule', async () => {
+    const file = 'src/app/dom/report.ts';
+    expect(await ruleHits(importOf('@sz/ai'), file, 'no-restricted-imports')).toBe(1);
+    expect(await ruleHits("export const f = fetch('x');\n", file, 'no-restricted-globals')).toBe(1);
+    expect(await ruleHits('export default 1;\n', file, 'no-restricted-syntax')).toBe(1);
+    expect(APP_OVERRIDES.map((o) => o.files)).toEqual([
+      ['src/app/dom/report.ts'],
+      ['src/app/dom/storage.ts', 'src/app/dom/loop.ts', 'src/app/dom/boot.ts'],
+    ]);
+  });
+
+  it('preventDefault is banned everywhere in app-shell and diagnostics (SEC-AS-31)', async () => {
+    const code = 'declare const e: { preventDefault(): void };\ne.preventDefault();\n';
+    for (const file of [dom, core, hook, diagCore, 'src/app/dom/loop.ts']) {
+      expect(await ruleHits(code, file, 'no-restricted-properties'), file).toBe(1);
+    }
+  });
+
+  it('console.warn stays allowed in app-shell DOM glue (boot warnings, BR-AS-04)', async () => {
+    const code = "console.warn('x');\nexport const a = 1;\n";
+    expect(await ruleHits(code, dom, 'no-restricted-properties')).toBe(0);
+    expect(await ruleHits(code, dom, 'no-restricted-globals')).toBe(0);
+    expect(await ruleHits(code, core, 'no-restricted-globals')).toBe(1);
+  });
+
+  it('app core uses ui values but sim, maps and render as types only', async () => {
+    expect(await ruleHits(importOf('@sz/ui'), core, 'no-restricted-syntax')).toBe(0);
+    const typeSim = "import type { SimSnapshot } from '@sz/sim';\nexport type S = SimSnapshot;\n";
+    expect(await ruleHits(typeSim, core, 'no-restricted-syntax')).toBe(0);
+    expect(await ruleHits(typeSim, core, 'no-restricted-imports')).toBe(0);
+    for (const spec of ['@sz/sim', '@sz/maps', '@sz/render']) {
+      expect(await ruleHits(importOf(spec), core, 'no-restricted-syntax'), spec).toBe(1);
+    }
+    const domType = 'export function f(e: Event): Event {\n  return e;\n}\n';
+    expect(await ruleHits(domType, core, 'no-restricted-syntax')).toBe(2);
+    expect(await ruleHits(domType, dom, 'no-restricted-syntax')).toBe(0);
+  });
+
+  it('createElement and setAttribute stay literal and safe in DOM glue (SEC-AS-12)', async () => {
+    const ok =
+      "declare const d: Document;\nd.createElement('canvas').setAttribute('data-testid', 'x');\n";
+    expect(await ruleHits(ok, dom, 'no-restricted-syntax')).toBe(0);
+    const bad =
+      "declare const d: Document;\ndeclare const t: string;\nd.createElement(t);\nd.createElement('script');\nd.createElement('div').setAttribute('onclick', 'x');\n";
+    expect(await ruleHits(bad, dom, 'no-restricted-syntax')).toBe(3);
+  });
+
+  it('diagnostics core imports only the kernel; app core and dom cannot reach the hook', async () => {
+    expect(await ruleHits(importOf('@sz/round'), diagCore, 'no-restricted-imports')).toBe(1);
+    expect(await ruleHits(importOf('@sz/kernel'), diagCore, 'no-restricted-imports')).toBe(0);
+    expect(await ruleHits(importOf('@sz/diagnostics/dom/hook'), dom, 'no-restricted-imports')).toBe(
+      1,
+    );
+    expect(await ruleHits(importOf('@sz/diagnostics'), core, 'no-restricted-imports')).toBe(1);
+  });
+
+  it('src/app/core and src/diagnostics/core each match exactly one zone', () => {
+    const matches = (zone: Zone, rel: string) => {
+      const inside = (glob: string) => rel.startsWith(glob.replace('**', ''));
+      return zone.files.some(inside) && !(zone.ignores ?? []).some(inside);
+    };
+    for (const rel of [
+      'src/app/core/x.ts',
+      'src/app/dom/x.ts',
+      'src/app/main.ts',
+      'src/diagnostics/core/x.ts',
+      'src/diagnostics/dom/x.ts',
+      'src/diagnostics/index.ts',
+    ]) {
+      expect(
+        ZONES.filter((z) => matches(z, rel)),
+        rel,
+      ).toHaveLength(1);
     }
   });
 });

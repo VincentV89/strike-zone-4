@@ -838,6 +838,264 @@ const RENDER_ZONES = [
 ];
 
 /** @type {ReadonlyArray<Zone>} */
+// ---- app-shell and diagnostics zones (security-design-app-shell SD-AS-1) ----
+
+/** Banned in every app-shell and diagnostics file (SEC-AS-10, SEC-AS-15, SEC-AS-30). */
+const APP_IO = named(
+  [
+    'fetch',
+    'XMLHttpRequest',
+    'WebSocket',
+    'EventSource',
+    'Worker',
+    'SharedWorker',
+    'BroadcastChannel',
+    'importScripts',
+    'eval',
+    'Function',
+    'Image',
+    'localStorage',
+    'sessionStorage',
+    'indexedDB',
+    'caches',
+    'globalThis',
+    'self',
+    'top',
+    'parent',
+    'frames',
+    'isFinite',
+    'isNaN',
+  ],
+  'SD-AS-1: app-shell has no network, dynamic code, direct storage or global escapes',
+);
+
+/** app core and both diagnostics zones: no DOM, clocks, timers, randomness or console. */
+const APP_PURE_GLOBALS = uniqueByName([
+  ...APP_IO,
+  ...named(
+    [
+      'window',
+      'document',
+      'navigator',
+      'location',
+      'requestAnimationFrame',
+      'performance',
+      'crypto',
+      'Date',
+      'setTimeout',
+      'setInterval',
+      'queueMicrotask',
+      'console',
+    ],
+    'SD-AS-1: pure app-shell and diagnostics code takes injected handles',
+  ),
+]);
+
+const CONSOLE_ERROR = objProp(
+  'console',
+  'error',
+  'SEC-AS-30: console.error goes through reportError in src/app/dom/report.ts.',
+);
+
+/** SD-AS-1 property bans, shared by all four zones. */
+const APP_PROPERTIES = [
+  ...PURE_PROPERTIES,
+  ...['log', 'info', 'debug', 'trace', 'table', 'dir'].map((p) =>
+    objProp('console', p, `SEC-AS-30: console.${p} is not used; ignored intents are counted.`),
+  ),
+  CONSOLE_ERROR,
+  ...[
+    'sendBeacon',
+    'cookie',
+    'innerHTML',
+    'outerHTML',
+    'insertAdjacentHTML',
+    'createContextualFragment',
+    'srcdoc',
+  ].map((p) => prop(p, `SEC-AS-12: ${p} is not used by app-shell.`)),
+  objProp('window', 'open', 'SEC-AS-12: app-shell never opens windows.'),
+  objProp('document', 'write', 'SEC-AS-12: document.write is an HTML sink.'),
+  objProp('document', 'writeln', 'SEC-AS-12: document.writeln is an HTML sink.'),
+  prop('preventDefault', 'SEC-AS-31: app-shell never suppresses events or errors.'),
+];
+
+const APP_TRY = {
+  selector: 'TryStatement',
+  message: 'SD-AS-11: only src/app/dom/{storage,loop,boot}.ts may catch.',
+};
+
+/** SD-AS-1 syntax bans shared by all four zones (S1 to S4). */
+const APP_SYNTAX = [
+  ...NO_DYNAMIC_IMPORT,
+  {
+    selector: "NewExpression[callee.name='DOMParser']",
+    message: 'SEC-AS-12: no HTML parsing in app-shell.',
+  },
+  {
+    selector: "CallExpression[callee.property.name='createElement'][arguments.0.type!='Literal']",
+    message: 'SEC-AS-12: createElement takes a literal tag name.',
+  },
+  {
+    selector:
+      'CallExpression[callee.property.name=/^createElement(NS)?$/] > Literal[value=/^(script|iframe|a|style|link|form|object|embed)$/i]',
+    message: 'SEC-AS-12: this element is not allowed in app-shell.',
+  },
+  {
+    selector:
+      'CallExpression[callee.property.name=/^setAttribute(NS)?$/] > Literal.arguments:first-child[value=/^(on.*|style|href|src|srcdoc)$/i]',
+    message: 'SEC-AS-12: event-handler, style and URL attributes are not allowed.',
+  },
+  APP_TRY,
+];
+
+const APP_DOM_TYPES = {
+  selector:
+    'TSTypeReference[typeName.name=/^(Window|Document|Element|HTMLElement|Event|Storage)$/]',
+  message: 'SD-AS-1: pure code takes plain values, not DOM types.',
+};
+
+const APP_SAMPLES = [
+  'three',
+  '@dimforge/rapier3d-compat',
+  '@sz/ai',
+  '@sz/ai/perception',
+  '@sz/combat',
+  '@sz/weapons',
+  '@sz/kernel/rng',
+  '@sz/render/gl/renderer',
+  'node:fs',
+];
+
+const APP_ZONES = [
+  {
+    // SD-AS-1: each src/app file matches exactly one zone (the ui/input precedent).
+    name: 'app-shell (L4)',
+    files: ['src/app/**'],
+    ignores: ['src/app/core/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!(@sz/(kernel|round|sim|physics|nav|maps|render|assets|audio|input|player|ui|persistence|stats|diagnostics)|@sz/(app|diagnostics)/core/[a-z-]+|@sz/app/dom/[a-z-]+)$)[^.]',
+        'SD-AS-1: app-shell imports the unit barrels, its own modules and diagnostics core only.',
+        [...APP_SAMPLES, '@sz/diagnostics/dom/hook', '@sz/app'],
+      ),
+    ],
+    allowed: [
+      '@sz/kernel',
+      '@sz/round',
+      '@sz/sim',
+      '@sz/physics',
+      '@sz/nav',
+      '@sz/maps',
+      '@sz/render',
+      '@sz/assets',
+      '@sz/audio',
+      '@sz/input',
+      '@sz/player',
+      '@sz/ui',
+      '@sz/persistence',
+      '@sz/stats',
+      '@sz/diagnostics',
+      '@sz/app/core/machine',
+      '@sz/app/dom/report',
+      './ports',
+    ],
+    forbiddenGlobals: APP_IO,
+    forbiddenProperties: APP_PROPERTIES,
+    forbiddenSyntax: APP_SYNTAX,
+  },
+  {
+    // Repeats every app-shell entry and adds purity.
+    name: 'app core (L4-pure)',
+    files: ['src/app/core/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!(@sz/(kernel|round|ui|persistence|stats|sim|maps|render)|@sz/app/core/[a-z-]+)$)[^.]',
+        'SD-AS-1: app core imports kernel, round, ui, persistence, stats, its own modules, and sim/maps/render types.',
+        [...APP_SAMPLES, '@sz/input', '@sz/physics', '@sz/app/dom/start', '@sz/diagnostics'],
+      ),
+    ],
+    allowed: [
+      '@sz/kernel',
+      '@sz/round',
+      '@sz/ui',
+      '@sz/persistence',
+      '@sz/stats',
+      '@sz/app/core/machine',
+      './boot-plan',
+    ],
+    forbiddenGlobals: APP_PURE_GLOBALS,
+    forbiddenProperties: APP_PROPERTIES,
+    forbiddenSyntax: [
+      ...APP_SYNTAX,
+      APP_DOM_TYPES,
+      AI_NO_BUS,
+      ...typeOnly('@sz/sim'),
+      ...typeOnly('@sz/maps'),
+      ...typeOnly('@sz/render'),
+    ],
+  },
+];
+
+const DIAGNOSTICS_ZONES = [
+  {
+    // SEC-AS-03: diagnostics never imports @sz/app; DOM handles are injected (SD-AS-10).
+    name: 'diagnostics (L3)',
+    files: ['src/diagnostics/**'],
+    ignores: ['src/diagnostics/core/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!(@sz/(kernel|round|sim)|@sz/diagnostics/core/[a-z-]+)$)[^.]',
+        'SD-AS-1: diagnostics imports the kernel, its core, and round/sim types.',
+        [...APP_SAMPLES, '@sz/app', '@sz/app/dom/start', '@sz/ui', '@sz/diagnostics'],
+      ),
+    ],
+    allowed: ['@sz/kernel', '@sz/round', '@sz/sim', '@sz/diagnostics/core/probe', './dom/hook'],
+    forbiddenGlobals: APP_PURE_GLOBALS,
+    forbiddenProperties: APP_PROPERTIES,
+    forbiddenSyntax: [...APP_SYNTAX, AI_NO_BUS, ...typeOnly('@sz/round'), ...typeOnly('@sz/sim')],
+  },
+  {
+    name: 'diagnostics core (L3-pure)',
+    files: ['src/diagnostics/core/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!(@sz/kernel|@sz/diagnostics/core/[a-z-]+)$)[^.]',
+        'SD-AS-1: diagnostics core imports only the kernel and its own modules.',
+        [...APP_SAMPLES, '@sz/app', '@sz/round', '@sz/sim', '@sz/diagnostics/dom/hook'],
+      ),
+    ],
+    allowed: ['@sz/kernel', '@sz/diagnostics/core/probe', './probe'],
+    forbiddenGlobals: APP_PURE_GLOBALS,
+    forbiddenProperties: APP_PROPERTIES,
+    forbiddenSyntax: [...APP_SYNTAX, APP_DOM_TYPES, AI_NO_BUS],
+  },
+];
+
+/**
+ * SD-AS-1 file overrides, generated from the app-shell zone with one entry removed so a later
+ * edit to the zone flows into them. They are not zones: the zone-coverage canary ignores them.
+ */
+const APP_SHELL_ZONE = APP_ZONES[0];
+
+export const APP_OVERRIDES = [
+  {
+    name: 'report may call console.error',
+    files: ['src/app/dom/report.ts'],
+    zone: {
+      ...APP_SHELL_ZONE,
+      forbiddenProperties: APP_SHELL_ZONE.forbiddenProperties.filter((p) => p !== CONSOLE_ERROR),
+    },
+  },
+  {
+    name: 'storage, loop and boot may catch',
+    files: ['src/app/dom/storage.ts', 'src/app/dom/loop.ts', 'src/app/dom/boot.ts'],
+    zone: {
+      ...APP_SHELL_ZONE,
+      forbiddenSyntax: APP_SHELL_ZONE.forbiddenSyntax.filter((s) => s !== APP_TRY),
+    },
+  },
+];
+
 export const ZONES = [
   {
     name: 'kernel (L0)',
@@ -1036,15 +1294,7 @@ export const ZONES = [
   },
   ...RENDER_ZONES,
   ...UI_ZONES,
-  {
-    name: 'diagnostics (L3)',
-    files: ['src/diagnostics/**'],
-    forbiddenImportPatterns: [THREE, RAPIER, APP, KERNEL_DEEP],
-    allowed: ['@sz/kernel'],
-    forbiddenGlobals: STORAGE_GLOBALS,
-    forbiddenProperties: [],
-    forbiddenSyntax: [],
-  },
+  ...DIAGNOSTICS_ZONES,
   ...PLAYER_INPUT_ZONES,
   {
     name: 'audio adapter (L3)',
@@ -1083,25 +1333,7 @@ export const ZONES = [
     forbiddenProperties: [...AUDIO_PROPERTIES, ...PURE_PROPERTIES],
     forbiddenSyntax: AUDIO_PARAM_SYNTAX,
   },
-  {
-    name: 'app-shell (L4)',
-    files: ['src/app/**'],
-    forbiddenImportPatterns: [KERNEL_DEEP],
-    allowed: [
-      '@sz/kernel',
-      '@sz/round',
-      '@sz/render',
-      'three',
-      '@sz/player',
-      '@sz/input',
-      '@sz/ui',
-      '@sz/persistence',
-      '@sz/maps',
-    ],
-    forbiddenGlobals: STORAGE_GLOBALS,
-    forbiddenProperties: [],
-    forbiddenSyntax: [],
-  },
+  ...APP_ZONES,
 ];
 
 /**
@@ -1140,6 +1372,12 @@ export function zoneConfig(zone) {
       'no-restricted-syntax': ['error', ...SHARED_SYNTAX, ...zone.forbiddenSyntax],
     },
   };
+}
+
+/** Maps one APP_OVERRIDES entry to a flat-config object named `strikezone/override:*`. */
+export function overrideConfig(override) {
+  const base = zoneConfig({ ...override.zone, files: override.files, ignores: undefined });
+  return { ...base, name: `strikezone/override: ${override.name}` };
 }
 
 /** Applies to every file under src/ before the zones, so unzoned directories get the shared ban. */

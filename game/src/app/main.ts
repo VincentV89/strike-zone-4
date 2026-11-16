@@ -1,8 +1,4 @@
-// Placeholder entry (BR-K-58) so `vite build` and the infra synth hook work before
-// app-shell exists. It proves the @sz alias resolves in the production build.
-import { DEFAULT_MATCH_SETUP, STEP_HZ } from '@sz/kernel';
+// Entry point (SD-AS-9): index.html loads this module; everything else lives in start().
+import { start } from '@sz/app/dom/start';
 
-const status = document.querySelector('[data-testid="app-status"]');
-if (status) {
-  status.textContent = `Kernel ready: ${String(STEP_HZ)} Hz tick, default map ${DEFAULT_MATCH_SETUP.mapId}.`;
-}
+start(window);

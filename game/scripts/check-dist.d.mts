@@ -14,3 +14,8 @@ export declare const NOTICE_REQUIREMENTS: ReadonlyMap<string, ReadonlyArray<stri
 export declare function findDynamicCode(text: string): string[];
 export declare function needsThreeNotice(root: string): boolean;
 export declare function sizeReport(root: string): string[];
+export declare const BUNDLE_GZIP_LIMIT: number;
+export declare function bundleGzipBytes(root: string): {
+  readonly total: number;
+  readonly files: ReadonlyArray<{ readonly name: string; readonly gzip: number }>;
+};

@@ -15,14 +15,16 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       // BR-K-57: the 80% floor applies to framework-free logic only. Every entry needs a reason.
       exclude: [
-        'src/app/**', // bootstrap glue (rAF loop, DOM wiring)
+        // app-shell (FD-AS-4): only the DOM glue and the entry are excluded; core/ stays counted.
+        'src/app/dom/**', // rAF loop, DOM wiring, boot glue and the composition root
+        'src/app/main.ts', // thin entry: start(window)
         // presentation-3d (FD-R-7): only the Three.js/WebGL glue is excluded; core/ stays counted.
         'src/render/gl/**', // Three.js scene glue and WebGL context
         'src/assets/gl/**', // Three.js asset upload, materials and shader warmup
         'src/audio/web/**', // Web Audio adapter; audio core stays covered (BR-A-50)
         'src/input/dom/**', // DOM events and pointer lock; the pure input core stays covered
         'src/ui/dom/**', // DOM builders; ui view-model mappers stay covered
-        'src/diagnostics/**', // browser probes and the e2e hook
+        'src/diagnostics/dom/**', // the e2e hook (window property install)
         'src/physics/**', // Rapier WASM adapter; checked by integration tests, not counted
         'src/**/index.ts', // barrels (re-exports only)
         'src/**/*.d.ts', // declarations
@@ -54,6 +56,9 @@ export default defineConfig({
         // presentation-3d (cicd-pipeline-presentation-3d, NFR-R-T1): pure render and asset logic.
         'src/render/core/**': { lines: 90, branches: 85 },
         'src/assets/core/**': { lines: 90, branches: 85 },
+        // app-shell (NFR-AS coverage): screen machine, boot plan, frame planner, probe, advisory.
+        'src/app/core/**': { lines: 90, branches: 85 },
+        'src/diagnostics/core/**': { lines: 90, branches: 85 },
       },
     },
   },

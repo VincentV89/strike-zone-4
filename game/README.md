@@ -1,6 +1,6 @@
 # StrikeZone game (`game/`)
 
-Vite + TypeScript package for the browser game. It holds the **kernel** (`src/kernel/`), the scaffold every later unit builds on, the **weapons-combat** library (`src/weapons/`, `src/combat/`), **game-audio** (`src/audio/`), and a placeholder entry (`index.html`, `src/app/main.ts`) that app-shell replaces.
+Vite + TypeScript package for the browser game. It holds the **kernel** (`src/kernel/`), the scaffold every later unit builds on, the **weapons-combat** library (`src/weapons/`, `src/combat/`), **game-audio** (`src/audio/`), and the **app-shell** composition root (`src/app/`, `src/diagnostics/`) that wires every unit into the running game.
 
 ## Commands
 
@@ -110,6 +110,15 @@ devicePixelRatio, onContextLost, onContextRestored })` → run `assets.loadSteps
   Pass `paused: false` during the end-of-round hold so death reactions finish.
 - Texture digests in `test/assets/core/textures.test.ts` are literals; a deliberate texture change
   updates them in the same commit.
+
+## App shell (`src/app/`, `src/diagnostics/`)
+
+- Entry: `index.html` loads `src/app/main.ts`, which only calls `start(window)` from `@sz/app/dom/start`. Nothing imports `@sz/app`.
+- `src/app/core/` is pure and counted by coverage (90/85): capability verdict, boot plan, screen machine (`dispatch(state, signal, ctx) → { state, commands, ignored }`), state → ScreenModel, frame planner, end hold, round signals. `src/app/dom/` is the browser glue (excluded from coverage, tested with Node fakes through `test/support/app-harness.ts`).
+- One `requestAnimationFrame` loop. Per frame: deferred match start, look once, ≤ 5 fixed ticks, one `bus.drain()`, HUD inside one `try` (first throw: one `console.error`, `ui.showHudFault()`, retry on the next loading → ready), audio listener, render, probe and the High-preset performance advisory.
+- `console.error` is called only by `src/app/dom/report.ts` (fatal, HUD fault, bot fault, bus subscriber). Boot failures use `console.warn` once. Intents that do not apply are counted (`ignoredIntents`), never logged.
+- `?e2e` installs a frozen, non-writable `window.__strikezone` with `snapshot()`, `round()`, `startMatch(setup, seed)` (no pointer lock needed), `inject(intent, ticks)` (1 to 3600 ticks, sanitised), `errors()`, `frameStats()` and `ignoredIntents()`.
+- `npm run check:dist` fails when the gzipped `dist/assets/*.js|*.mjs|*.css` exceed 2,500,000 B. The first full build measured 1,860,996 B.
 
 ## Rules for later units
 
