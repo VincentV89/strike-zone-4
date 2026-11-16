@@ -28,3 +28,12 @@ export declare const SHARED_SYNTAX: ReadonlyArray<{
 export declare const ZONES: ReadonlyArray<Zone>;
 export declare const SRC_BASE: unknown;
 export declare function zoneConfig(zone: Zone): unknown;
+
+export interface ZoneOverride {
+  readonly name: string;
+  readonly files: string[];
+  readonly zone: Zone;
+}
+
+export declare const APP_OVERRIDES: ReadonlyArray<ZoneOverride>;
+export declare function overrideConfig(override: ZoneOverride): unknown;
