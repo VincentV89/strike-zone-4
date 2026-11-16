@@ -1,5 +1,6 @@
 // Hybrid deny-list matcher for names and callouts from commercial games (SEC-WM-12,
-// SD-WH-2, ADR-WH-6). Rule (a): every entry must not equal a token or a join of two
+// SD-WH-2, ADR-WH-6, LC-WH-6), shared by the map content tests and the bot-ai content test
+// (SEC-AI-42). Rule (a): every entry must not equal a token or a join of two
 // consecutive tokens. Rule (b): entries of 7+ characters must also not appear as a substring
 // of the flattened string, which catches compounds such as "oldcatwalks". Short entries are
 // token-only, so "Industrial Warehouse" (which contains "dust") passes.

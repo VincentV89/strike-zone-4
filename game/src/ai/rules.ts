@@ -1,0 +1,70 @@
+/** Bot-ai tuning (business-rules-bot-ai). Tests assert invariants, not these literals. */
+import { degToRad } from '@sz/kernel';
+
+export const AI_RULES = Object.freeze({
+  // FSM thresholds (TRANSITIONS table)
+  retreatHealth: 30,
+  damageFreshSec: 1.0,
+  lostSightSec: 1.5,
+  investigateMaxSec: 20,
+  searchSec: 6,
+  flankMaxSec: 15,
+  retreatMaxSec: 12,
+  minDwellSec: 0.5,
+  // planning
+  coverRadiusM: 25,
+  coverReloadRadiusM: 15,
+  coverCandidates: 8,
+  maxSightChecks: 6,
+  maxRelocations: 2,
+  retreatMinM: 12,
+  retreatMaxM: 40,
+  retreatAwayDot: 0.3,
+  retreatHoldSec: 3,
+  probeDistanceM: 15,
+  standEyeM: 1.62,
+  crouchEyeM: 1.05,
+  kneeHeightM: 0.5,
+  searchRadiusM: 8,
+  searchPoints: 2,
+  searchSweepRad: degToRad(60),
+  // patrol
+  patrolIdealM: 20,
+  patrolFarM: 35,
+  patrolAttempts: 3,
+  patrolRecent: 3,
+  patrolWaitMinSec: 1.0,
+  patrolWaitMaxSec: 2.5,
+  // engage
+  engageApproachM: 30,
+  engageBackOffM: 8,
+  strafeM: 2.5,
+  strafeSwitchMinSec: 0.8,
+  strafeSwitchMaxSec: 1.6,
+  strafeNodeM: 3,
+  strafeLevelM: 1,
+  aimHeightM: 1.0,
+  fireConeRad: degToRad(4),
+  coverHoldMinSec: 1.5,
+  coverHoldMaxSec: 3.0,
+  // movement (BR-AI-73)
+  walkSpeed: 3.5,
+  runSpeed: 5.5,
+  strafeSpeed: 2.5,
+  searchSpeed: 2.5,
+  maxSpeed: 5.5,
+  arriveM: 0.6,
+  arriveFinalM: 0.5,
+  arriveCornerM: 1.0,
+  cornerClusterM: 2,
+  // stuck (BR-AI-74)
+  stuckWindowSec: 2.0,
+  stuckProgressM: 0.5,
+  nudgeSec: 0.5,
+  nudgeSpeed: 2.5,
+  /** After a stuck failure, patrol avoids that travel direction for this long. */
+  stuckAvoidSec: 10,
+  stuckAvoidDot: 0.7,
+  // facing (BR-AI-76)
+  maxPitchRad: degToRad(60),
+});

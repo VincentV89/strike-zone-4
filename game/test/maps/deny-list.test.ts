@@ -1,14 +1,18 @@
-// Table cases for the hybrid deny-list matcher (SD-WH-2, SEC-WH-02, SEC-WH-03, BR-WH-51).
+// Table cases for the hybrid deny-list matcher (ADR-WH-6, SD-WH-2, SEC-WH-02, SEC-WH-03,
+// BR-WH-51). Shared by maps and bot-ai content tests.
 import { describe, expect, it } from 'vitest';
 import { DENY_LIST, denyHits, tokens } from '../support/deny-list';
 
 describe('deny-list matcher', () => {
   it.each([
+    ['Dust', 'dust'],
     ['Dust 2', 'dust'],
     ['de_dust2', 'dust'],
     ['Long A', 'longa'],
+    ['long-a', 'longa'],
     ['CT spawn', 'ctspawn'],
     ['CTSpawn', 'ctspawn'],
+    ['ct_spawn2', 'ctspawn'],
     ['B site', 'bsite'],
     ['westCatwalk', 'catwalk'],
     ['oldcatwalks', 'catwalk'],
@@ -22,6 +26,8 @@ describe('deny-list matcher', () => {
   it.each([
     'Industrial Warehouse',
     'industrial-warehouse',
+    'west-spawn',
+    'take-cover',
     'west-containers',
     'West Container Rows',
     'south-bay',
@@ -41,6 +47,7 @@ describe('deny-list matcher', () => {
   );
 
   it('tokenises on separators, camel case and trailing digits', () => {
+    expect(tokens('westCatwalk2 B-site')).toEqual(['west', 'catwalk', 'b', 'site']);
     expect(tokens('de_dust2')).toEqual(['de', 'dust']);
     expect(tokens('CTSpawn')).toEqual(['ct', 'spawn']);
     expect(tokens('bay-s--28-31')).toEqual(['bay', 's']);

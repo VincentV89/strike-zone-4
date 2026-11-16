@@ -361,6 +361,52 @@ const UNIT_GLOBALS = [
   })),
 ];
 
+// ---- bot-ai zones (security-design-bot-ai SD-AI-1, SD-AI-2, SD-AI-4, SD-AI-7) ----
+
+/** Both AI zones: no I/O, timers, global escapes, eval or Reflect (SEC-AI-10, R-AI-4). */
+const AI_GLOBALS = [
+  ...PURE_GLOBALS,
+  ...named(
+    [...NO_IO_GLOBAL_NAMES, 'eval', 'Reflect'],
+    'SD-AI-1: bot-ai has no I/O, timers or global escapes; use Number.isFinite',
+  ),
+];
+
+/** SD-AI-2: the same four selectors as PLAYER_TYPE_ONLY, for any package. */
+function typeOnly(source) {
+  return [
+    {
+      selector: `ImportDeclaration[source.value='${source}'][importKind!='type']`,
+      message: `SD-AI-2: import ${source} with \`import type { ... }\` only.`,
+    },
+    {
+      selector: `ExportNamedDeclaration[source.value='${source}'][exportKind!='type']`,
+      message: `SD-AI-2: re-export ${source} types only.`,
+    },
+    {
+      selector: `ExportAllDeclaration[source.value='${source}']`,
+      message: `SD-AI-2: no export-all from ${source}.`,
+    },
+    {
+      selector: `ImportExpression[source.value='${source}']`,
+      message: `SD-AI-2: no dynamic import of ${source}.`,
+    },
+  ];
+}
+
+/** SD-AI-4: members past the narrow world view (actor-mask rays, budget reset, reservation wipe). */
+const AI_PORT_ESCAPES = {
+  selector: 'MemberExpression[property.name=/^(raycast|resetTick|clearReservations)$/]',
+  message:
+    'SD-AI-4: bot-ai uses only the members of BotWorldView (no raycast, resetTick or clearReservations).',
+};
+
+/** SD-AI-7: bot-ai never creates an event bus or a clock. */
+const AI_NO_BUS = {
+  selector: 'ImportSpecifier[imported.name=/^(createEventBus|createFixedClock)$/]',
+  message: 'SD-AI-7: bot-ai is off the bus; match-loop emits BotStateChanged from transitions.',
+};
+
 /** @type {ReadonlyArray<Zone>} */
 export const ZONES = [
   {
@@ -445,37 +491,58 @@ export const ZONES = [
     forbiddenSyntax: [],
   },
   {
+    // SD-AI-1: one catch-all import pattern, so each forbidden import reports exactly once.
     name: 'perception (L1)',
     files: ['src/ai/perception/**'],
     forbiddenImportPatterns: [
-      ...L1_IMPORTS,
       imp(
-        '^@sz/ai($|/(?!perception(/|$)))',
-        'dec-perception-gateway: perception must not import bot-ai (no cycle).',
-        ['@sz/ai', '@sz/ai/brain'],
+        '^(?!(@sz/(kernel|player)|@sz/ai/perception/[a-z-]+)$)[^.]',
+        'SD-AI-1/dec-perception-gateway: perception imports only @sz/kernel and @sz/player types.',
+        [
+          '@sz/ai',
+          '@sz/ai/brain',
+          '@sz/combat',
+          '@sz/physics',
+          '@sz/sim',
+          '@sz/nav',
+          '@sz/kernel/rng',
+          'three',
+          '@dimforge/rapier3d-compat',
+        ],
       ),
     ],
-    allowed: ['@sz/kernel', '@sz/player', '@sz/ai/perception/types'],
-    forbiddenGlobals: PURE_GLOBALS,
+    allowed: ['@sz/kernel', '@sz/player', '@sz/ai/perception/types', './memory'],
+    forbiddenGlobals: AI_GLOBALS,
     forbiddenProperties: PURE_PROPERTIES,
-    forbiddenSyntax: [],
+    forbiddenSyntax: [...NO_DYNAMIC_IMPORT, ...PLAYER_TYPE_ONLY, AI_PORT_ESCAPES, AI_NO_BUS],
   },
   {
     name: 'bot-ai (L1, no-cheat)',
     files: ['src/ai/**'],
     ignores: ['src/ai/perception/**'],
     forbiddenImportPatterns: [
-      ...L1_IMPORTS,
       imp(
-        '^@sz/(player|combat)(/|$)',
-        'req-bot-no-cheat: bot-ai learns about the player only through perception (BotPercepts).',
-        ['@sz/player', '@sz/combat/damage'],
+        '^(?!(@sz/(kernel|nav|weapons|maps)|@sz/ai/perception)$)[^.]',
+        'req-bot-no-cheat/SD-AI-1: bot-ai learns about the player only through perception (BotPercepts).',
+        [
+          '@sz/player',
+          '@sz/combat',
+          '@sz/combat/damage',
+          '@sz/physics',
+          '@sz/sim',
+          '@sz/ai/perception/sense',
+          '@sz/maps/desert-compound',
+          '@sz/kernel/rng',
+          'three',
+          '@dimforge/rapier3d-compat',
+          '@sz/audio',
+        ],
       ),
     ],
-    allowed: ['@sz/kernel', '@sz/ai/perception', '@sz/nav', '@sz/weapons'],
-    forbiddenGlobals: PURE_GLOBALS,
+    allowed: ['@sz/kernel', '@sz/ai/perception', '@sz/nav', '@sz/weapons', '@sz/maps', './brain'],
+    forbiddenGlobals: AI_GLOBALS,
     forbiddenProperties: PURE_PROPERTIES,
-    forbiddenSyntax: [],
+    forbiddenSyntax: [...NO_DYNAMIC_IMPORT, ...typeOnly('@sz/maps'), AI_PORT_ESCAPES, AI_NO_BUS],
   },
   {
     name: 'simulation (L2)',

@@ -40,6 +40,9 @@ export default defineConfig({
         // ADR-WC-2: weapons-combat logic, same bar as the kernel.
         'src/weapons/**': { lines: 95, branches: 90 },
         'src/combat/**': { lines: 95, branches: 90 },
+        // ADR-AI-4: bot-ai logic; the perception no-cheat gateway gets the kernel bar.
+        'src/ai/**': { lines: 90, branches: 85 },
+        'src/ai/perception/**': { lines: 95, branches: 90 },
       },
     },
   },
