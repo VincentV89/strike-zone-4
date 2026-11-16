@@ -19,7 +19,7 @@ export default defineConfig({
         'src/render/**', // Three.js / WebGL
         'src/assets/**', // Three.js procedural asset factory
         'src/audio/web/**', // Web Audio adapter; audio core stays covered (BR-A-50)
-        'src/input/**', // DOM events and pointer lock
+        'src/input/dom/**', // DOM events and pointer lock; the pure input core stays covered
         'src/ui/dom/**', // DOM builders; ui view-model mappers stay covered
         'src/diagnostics/**', // browser probes and the e2e hook
         'src/physics/**', // Rapier WASM adapter; checked by integration tests, not counted
@@ -31,6 +31,8 @@ export default defineConfig({
       thresholds: {
         lines: 80,
         'src/kernel/**': { lines: 95, branches: 90 },
+        'src/player/**': { lines: 95, branches: 90 },
+        'src/input/core/**': { lines: 90, branches: 85 },
         'src/audio/core/**': { lines: 90, branches: 85 },
         // ADR-WC-2: weapons-combat logic, same bar as the kernel.
         'src/weapons/**': { lines: 95, branches: 90 },
