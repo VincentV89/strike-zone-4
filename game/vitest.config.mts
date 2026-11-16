@@ -31,6 +31,9 @@ export default defineConfig({
       thresholds: {
         lines: 80,
         'src/kernel/**': { lines: 95, branches: 90 },
+        // world-maps (cicd-pipeline-world-maps): maps and nav are pure and fully counted.
+        'src/maps/**': { lines: 90, branches: 85 },
+        'src/nav/**': { lines: 90, branches: 85 },
         'src/player/**': { lines: 95, branches: 90 },
         'src/input/core/**': { lines: 90, branches: 85 },
         'src/audio/core/**': { lines: 90, branches: 85 },

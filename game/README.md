@@ -8,7 +8,7 @@ Run from `game/` (or with `npm --prefix game run <script>` from the repository r
 
 | Command              | What it does                                                                                   |
 | -------------------- | ---------------------------------------------------------------------------------------------- |
-| `npm ci`             | Install the pinned devDependencies. There are no runtime dependencies yet.                     |
+| `npm ci`             | Install pinned dependencies. The only runtime dependency is `@dimforge/rapier3d-compat`.       |
 | `npm run verify`     | Release gate: lint, typecheck, tests with coverage, build, dist check, clean, advisory audit.  |
 | `npm run lint`       | ESLint with `--max-warnings 0` (includes the import zones) and the Prettier check.             |
 | `npm test`           | Vitest with v8 coverage. Kernel, weapons, combat: 95% lines, 90% branches. Global: 80% lines.  |
@@ -75,6 +75,14 @@ audio.duck(paused);
 ## Test support
 
 `test/support/` holds port fakes (`createFakePhysics`, `createFakeMover`), `createRecordingBus`, `describePhysicsQueryContract`, `createCountingRng`, the weapon tick driver, the combat scene helpers, the Web Audio fake (`createFakeWebAudio`) and `fnv1a` for literal determinism digests. world-maps runs the same contract suite against the Rapier adapter.
+
+## World, navigation and physics (world-maps)
+
+- `@sz/maps`: map schema, authoring helpers (`box`, `wall`, `ramp`, `crate`, `chain`, …), `createMapCatalog([...])` (static validation, deep freeze, no global registry), `selectSpawns`, `collidersToRadarSegments`, and `desertCompound`. Imports only `@sz/kernel`.
+- `@sz/nav`: `buildNavGraph(map, physics)` validates every link (length, slope, clearance, ground), requires one connected component and linked routes; `NavGraph` offers `findPath`, `findFlankPath`, reservations; `createPathBudget(4)`. Imports only `@sz/kernel` and `@sz/maps`.
+- `@sz/physics`: the only Rapier importer. `initPhysics()` (boot step, dynamic import, retryable `BootError`), `createPhysicsHost()` (one live world; build nav graphs with `host.query`), `createPhysicsWorld(map)`, `DEFAULT_CHARACTER`. Per tick: moves, `syncHitboxes`, one `step(1/60)`, then combat raycasts.
+- Map tests run every map in `test/maps/shipped-maps.ts` against real Rapier, including a link walk with the real character controller. Rapier suites skip only when `SZ_ALLOW_RAPIER_SKIP=1` is set.
+- The build emits `assets/third-party-notices-<hash>.txt` (Rapier's Apache-2.0 licence); `check:dist` requires it.
 
 ## Rules for later units
 

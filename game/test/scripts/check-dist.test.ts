@@ -59,6 +59,55 @@ describe('check-dist (SD-K-3)', () => {
     expect(failures[1]).toContain('public/ is not empty');
   });
 
+  describe('Rapier notice (SD-WM-11)', () => {
+    const PKG = JSON.stringify({ dependencies: { '@dimforge/rapier3d-compat': '~0.21.0' } });
+    const NOTICE =
+      'StrikeZone third-party notices\n@dimforge/rapier3d-compat 0.21.0\nApache License\nVersion 2.0, January 2004\nhttp://www.apache.org/licenses/\nhttp://www.apache.org/licenses/LICENSE-2.0\n';
+    const base = { 'package.json': PKG, 'dist/index.html': GOOD_INDEX };
+
+    it('passes with exactly one notice carrying the two Apache URLs', () => {
+      const root = makeRoot({ ...base, 'dist/assets/third-party-notices-Ab_1.txt': NOTICE });
+      expect(checkDist(root)).toEqual([]);
+    });
+
+    it('fails when the notice is missing or duplicated', () => {
+      expect(checkDist(makeRoot(base))).toEqual([
+        'expected exactly one dist/assets/third-party-notices-*.txt, found 0 (SD-WM-11)',
+      ]);
+      const two = makeRoot({
+        ...base,
+        'dist/assets/third-party-notices-a.txt': NOTICE,
+        'dist/assets/third-party-notices-b.txt': NOTICE,
+      });
+      expect(checkDist(two)[0]).toContain('found 2');
+    });
+
+    it('fails on any other URL in the notice, or on missing licence text', () => {
+      const root = makeRoot({
+        ...base,
+        'dist/assets/third-party-notices-x.txt': NOTICE.replace(
+          'Version 2.0',
+          'see https://evil.example/',
+        ),
+      });
+      expect(checkDist(root)).toEqual([
+        'dist/assets/third-party-notices-x.txt: external URL https://evil.example/,',
+        'dist/assets/third-party-notices-x.txt: missing "Version 2.0"',
+      ]);
+    });
+
+    it('an allowed Apache URL anywhere else still fails', () => {
+      const root = makeRoot({
+        ...base,
+        'dist/assets/third-party-notices-x.txt': NOTICE,
+        'dist/assets/index-1.js': 'u="http://www.apache.org/licenses/"',
+      });
+      expect(checkDist(root)).toEqual([
+        'dist/assets/index-1.js: external URL http://www.apache.org/licenses/',
+      ]);
+    });
+  });
+
   it('SEC-A-10: fails on audio files in dist (BR-A-60)', () => {
     const root = makeRoot({
       'dist/index.html': GOOD_INDEX,
