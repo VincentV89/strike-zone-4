@@ -18,7 +18,7 @@ export default defineConfig({
         'src/app/**', // bootstrap glue (rAF loop, DOM wiring)
         'src/render/**', // Three.js / WebGL
         'src/assets/**', // Three.js procedural asset factory
-        'src/audio/**', // Web Audio
+        'src/audio/web/**', // Web Audio adapter; audio core stays covered (BR-A-50)
         'src/input/**', // DOM events and pointer lock
         'src/ui/dom/**', // DOM builders; ui view-model mappers stay covered
         'src/diagnostics/**', // browser probes and the e2e hook
@@ -31,6 +31,7 @@ export default defineConfig({
       thresholds: {
         lines: 80,
         'src/kernel/**': { lines: 95, branches: 90 },
+        'src/audio/core/**': { lines: 90, branches: 85 },
       },
     },
   },

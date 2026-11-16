@@ -13,7 +13,7 @@ export interface Zone {
   readonly allowed: ReadonlyArray<string>;
   readonly forbiddenGlobals: ReadonlyArray<{ readonly name: string; readonly message: string }>;
   readonly forbiddenProperties: ReadonlyArray<{
-    readonly object: string;
+    readonly object?: string;
     readonly property: string;
     readonly message: string;
   }>;

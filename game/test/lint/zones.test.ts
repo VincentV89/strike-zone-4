@@ -56,7 +56,8 @@ describe.each(ZONES.map((z) => [z.name, z] as const))('zone %s', (_name, zone) =
     });
   }
 
-  const props = zone.forbiddenProperties.map((p) => `${p.object}.${p.property}`);
+  // A property-only ban (no `object`) is rendered on an arbitrary receiver (SD-A-5).
+  const props = zone.forbiddenProperties.map((p) => `${p.object ?? 'x'}.${p.property}`);
   if (props.length > 0) {
     it.each(props)('forbids %s', async (expr) => {
       expect(
@@ -166,5 +167,67 @@ describe('outside the zones', () => {
     expect(
       await ruleHits('export const r = Math.random();\n', file, 'no-restricted-properties'),
     ).toBe(1);
+  });
+});
+
+// game-audio zones (security-design-game-audio SD-A-1, SD-A-5, SD-A-8). Hand-pinned.
+describe('audio zones', () => {
+  const adapter = 'src/audio/web/__canary__.ts';
+  const core = 'src/audio/core/__canary__.ts';
+
+  it('SD-A-8: core rejects fetch, decodeAudioData, Math.random and console.warn together', async () => {
+    const code = [
+      "export const a = fetch('x');",
+      'export const b = x.decodeAudioData();',
+      'export const c = Math.random();',
+      "console.warn('x');",
+    ].join('\n');
+    expect(await ruleHits(code, core, 'no-restricted-globals')).toBe(2); // fetch, console
+    expect(await ruleHits(code, core, 'no-restricted-properties')).toBe(2);
+  });
+
+  it('SD-A-8: core may not import the audio barrel or the web adapter', async () => {
+    expect(await ruleHits(importOf('@sz/audio'), core, 'no-restricted-imports')).toBe(1);
+    expect(await ruleHits(importOf('@sz/audio/web/params'), core, 'no-restricted-imports')).toBe(1);
+    expect(await ruleHits(importOf('@sz/kernel'), core, 'no-restricted-imports')).toBe(0);
+  });
+
+  it('the adapter may use globalThis, setTimeout and console.warn, but not console.error', async () => {
+    const code = [
+      'export const g = globalThis.AudioContext;',
+      'setTimeout(() => undefined, 0);',
+      "console.warn('x');",
+    ].join('\n');
+    expect(await ruleHits(code, adapter, 'no-restricted-globals')).toBe(0);
+    expect(await ruleHits(code, adapter, 'no-restricted-properties')).toBe(0);
+    expect(await ruleHits("console.error('x');\n", adapter, 'no-restricted-properties')).toBe(1);
+  });
+
+  it.each([
+    'p.value = 1;',
+    'p.gain.value = 0.5;',
+    'p.setValueAtTime(0, 1);',
+    'p.setTargetAtTime(0, 1, 0.1);',
+    'p.linearRampToValueAtTime(0, 1);',
+    'p.exponentialRampToValueAtTime(1, 1);',
+    'p.setValueCurveAtTime(c, 0, 1);',
+    'l.setPosition(0, 0, 0);',
+    'l.setOrientation(0, 0, -1, 0, 1, 0);',
+  ])('SD-A-1: `%s` is banned outside params.ts (adapter and core)', async (stmt) => {
+    const code = `declare const p: any; declare const l: any; declare const c: any;\n${stmt}\n`;
+    expect(await ruleHits(code, adapter, 'no-restricted-syntax')).toBe(1);
+    expect(await ruleHits(code, core, 'no-restricted-syntax')).toBe(1);
+  });
+
+  it('reading .value and other assignments stay allowed', async () => {
+    const code = 'declare const p: any;\nexport const v = p.value;\np.buffer = 1;\n';
+    expect(await ruleHits(code, adapter, 'no-restricted-syntax')).toBe(0);
+  });
+
+  it('input and diagnostics keep window and navigator', async () => {
+    const code = 'export const w = window;\nexport const n = navigator;\n';
+    expect(await ruleHits(code, 'src/input/a.ts', 'no-restricted-globals')).toBe(0);
+    expect(await ruleHits(code, 'src/diagnostics/a.ts', 'no-restricted-globals')).toBe(0);
+    expect(await ruleHits(code, adapter, 'no-restricted-globals')).toBe(2);
   });
 });

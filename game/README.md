@@ -1,6 +1,6 @@
 # StrikeZone game (`game/`)
 
-Vite + TypeScript package for the browser game. This first version holds the **kernel** (`src/kernel/`), the scaffold every later unit builds on, and a placeholder entry (`index.html`, `src/app/main.ts`) that app-shell replaces.
+Vite + TypeScript package for the browser game. It holds the **kernel** (`src/kernel/`), the scaffold every later unit builds on, **game-audio** (`src/audio/`), and a placeholder entry (`index.html`, `src/app/main.ts`) that app-shell replaces.
 
 ## Commands
 
@@ -41,9 +41,31 @@ Cross-directory imports use the `@sz/<dir>` alias (tsconfig, Vite and Vitest). I
 - `EventBus`: `emit` queues, `drain` delivers once per frame. Emits during a drain go to the next one. A throwing subscriber is reported once through `console.error`.
 - `createRng(seed)`: mulberry32, pinned by golden-value tests. Not for security decisions.
 
+## game-audio (`src/audio/`)
+
+- `src/audio/core/**` is pure TypeScript (zone `audio core (L3-pure)`): cue table, DSP and recipes, bank synthesis and validation, event router, mixer, voice policy, listener geometry. It counts toward coverage (90 % lines, 85 % branches).
+- `src/audio/web/**` is the Web Audio adapter (zone `audio adapter (L3)`, excluded from coverage, tested against `test/support/fake-web-audio.ts`). All AudioParam writes go through `web/params.ts`.
+- Every sound is synthesised at boot into 48 kHz PCM from a seeded Rng. No audio file may be committed or shipped (`check:dist` and `test/audio/no-audio-files.test.ts`).
+- No `AudioContext` exists before `unlock()`. app-shell wiring:
+
+```ts
+const audio = createAudio();
+await audio.prepareBank(); // BootService step 'audio'; rejects { step: 'audio', retryable: true }
+const off = bindAudioToEvents(bus, audio, PLAYER_ID); // once, at composition time
+// Click to enter and every later UI activation:
+void audio.unlock().then(() => audio.play('ui-click'));
+// Each render frame, before bus.drain():
+audio.setListener(eyePos, yaw);
+// Settings and pause:
+audio.setVolumes(master / 100, sfx / 100);
+audio.duck(paused);
+```
+
+- Audio unavailable (no constructor, resume refused) gives a muted session and one `console.warn`, never `console.error`.
+
 ## Test support
 
-`test/support/` holds port fakes (`createFakePhysics`, `createFakeMover`), `createRecordingBus` and `describePhysicsQueryContract`. world-maps runs the same contract suite against the Rapier adapter.
+`test/support/` holds port fakes (`createFakePhysics`, `createFakeMover`), `createRecordingBus`, `describePhysicsQueryContract`, the Web Audio fake (`createFakeWebAudio`) and `fnv1a` for literal determinism digests. world-maps runs the same contract suite against the Rapier adapter.
 
 ## Rules for later units
 

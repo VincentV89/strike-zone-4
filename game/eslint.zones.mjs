@@ -75,6 +75,69 @@ const PURE_PROPERTIES = [
   { object: 'Math', property: 'random', message: 'SEC-K-07: use the injected Rng (BR-K-34).' },
 ];
 
+// ---- game-audio zones (security-design-game-audio SD-A-1, SD-A-5, SD-A-8) ----
+
+const AUDIO_IMPORTS = [THREE, RAPIER, APP, KERNEL_DEEP];
+
+const AUDIO_GLOBALS = [
+  ...STORAGE_GLOBALS,
+  ...[
+    'fetch',
+    'XMLHttpRequest',
+    'Audio',
+    'HTMLAudioElement',
+    'OfflineAudioContext',
+    'navigator',
+    'window',
+    'document',
+  ].map((name) => ({ name, message: `SEC-A-02: ${name} is not allowed in audio.` })),
+  ...['isFinite', 'isNaN'].map((name) => ({
+    name,
+    message: `SD-A-2: ${name} coerces. Use Number.${name}.`,
+  })),
+];
+
+const AUDIO_PROPERTIES = [
+  ...[
+    'decodeAudioData',
+    'addModule',
+    'getUserMedia',
+    'createMediaStreamSource',
+    'createMediaElementSource',
+    'createScriptProcessor',
+  ].map((property) => ({ property, message: `SEC-A-02: ${property} is not allowed in audio.` })),
+  ...['error', 'log', 'info', 'debug', 'trace'].map((property) => ({
+    object: 'console',
+    property,
+    message: 'SD-A-7: audio logs only through warnOnce (console.warn).',
+  })),
+];
+
+const AUDIO_PARAM_METHODS =
+  'setValueAtTime|setTargetAtTime|linearRampToValueAtTime|exponentialRampToValueAtTime|setValueCurveAtTime|setPosition|setOrientation';
+
+/** SD-A-1: AudioParam writes only through src/audio/web/params.ts (finite-guarded). */
+const AUDIO_PARAM_SYNTAX = [
+  {
+    selector: "AssignmentExpression > MemberExpression.left[property.name='value']",
+    message: 'SD-A-1: write AudioParams through setParam in src/audio/web/params.ts.',
+  },
+  {
+    selector: `CallExpression[callee.property.name=/^(${AUDIO_PARAM_METHODS})$/]`,
+    message: 'SD-A-1: schedule AudioParams through src/audio/web/params.ts.',
+  },
+];
+
+/** Later entries with the same name are dropped, so a canary sees each global once. */
+function uniqueByName(entries) {
+  const seen = new Set();
+  return entries.filter((e) => {
+    if (seen.has(e.name)) return false;
+    seen.add(e.name);
+    return true;
+  });
+}
+
 /** @type {ReadonlyArray<Zone>} */
 export const ZONES = [
   {
@@ -228,13 +291,50 @@ export const ZONES = [
     forbiddenSyntax: [],
   },
   {
-    name: 'input, audio, diagnostics (L3)',
-    files: ['src/input/**', 'src/audio/**', 'src/diagnostics/**'],
+    name: 'input, diagnostics (L3)',
+    files: ['src/input/**', 'src/diagnostics/**'],
     forbiddenImportPatterns: [THREE, RAPIER, APP, KERNEL_DEEP],
     allowed: ['@sz/kernel'],
     forbiddenGlobals: STORAGE_GLOBALS,
     forbiddenProperties: [],
     forbiddenSyntax: [],
+  },
+  {
+    name: 'audio adapter (L3)',
+    files: ['src/audio/**'],
+    forbiddenImportPatterns: AUDIO_IMPORTS,
+    allowed: ['@sz/kernel'],
+    forbiddenGlobals: AUDIO_GLOBALS,
+    forbiddenProperties: AUDIO_PROPERTIES,
+    forbiddenSyntax: AUDIO_PARAM_SYNTAX,
+  },
+  {
+    // Must come after the adapter zone: it repeats every adapter entry (flat config replaces arrays).
+    name: 'audio core (L3-pure)',
+    files: ['src/audio/core/**'],
+    forbiddenImportPatterns: [
+      ...AUDIO_IMPORTS,
+      imp('^@sz/audio(/|$)', 'BR-A-50: audio core never imports the audio barrel or web adapter.', [
+        '@sz/audio',
+        '@sz/audio/web/adapter',
+      ]),
+    ],
+    allowed: ['@sz/kernel', './dsp'],
+    forbiddenGlobals: uniqueByName([
+      ...AUDIO_GLOBALS,
+      ...PURE_GLOBALS,
+      ...[
+        'globalThis',
+        'console',
+        'setTimeout',
+        'setInterval',
+        'AudioContext',
+        'webkitAudioContext',
+        'AudioBuffer',
+      ].map((name) => ({ name, message: `BR-A-50: ${name} is not allowed in audio core.` })),
+    ]),
+    forbiddenProperties: [...AUDIO_PROPERTIES, ...PURE_PROPERTIES],
+    forbiddenSyntax: AUDIO_PARAM_SYNTAX,
   },
   {
     name: 'persistence (L3)',
@@ -265,12 +365,16 @@ export const ZONES = [
  *   forbiddenImportPatterns: ReadonlyArray<ImportPattern>,
  *   allowed: ReadonlyArray<string>,
  *   forbiddenGlobals: ReadonlyArray<{ name: string, message: string }>,
- *   forbiddenProperties: ReadonlyArray<{ object: string, property: string, message: string }>,
+ *   forbiddenProperties: ReadonlyArray<{ object?: string, property: string, message: string }>,
  *   forbiddenSyntax: ReadonlyArray<{ selector: string, message: string }>,
  * }} Zone
  */
 
 const stripSamples = ({ regex, message }) => ({ regex, message });
+
+/** Property-only bans (no `object`) must omit the key: ESLint's schema may reject undefined. */
+const propertyOption = ({ object, property, message }) =>
+  object === undefined ? { property, message } : { object, property, message };
 
 /** Maps one zone to a flat-config object, concatenating the shared entries (SD-K-2). */
 export function zoneConfig(zone) {
@@ -284,7 +388,7 @@ export function zoneConfig(zone) {
         { patterns: [...SHARED_IMPORTS, ...zone.forbiddenImportPatterns].map(stripSamples) },
       ],
       'no-restricted-globals': ['error', ...zone.forbiddenGlobals],
-      'no-restricted-properties': ['error', ...zone.forbiddenProperties],
+      'no-restricted-properties': ['error', ...zone.forbiddenProperties.map(propertyOption)],
       'no-restricted-syntax': ['error', ...SHARED_SYNTAX, ...zone.forbiddenSyntax],
     },
   };
