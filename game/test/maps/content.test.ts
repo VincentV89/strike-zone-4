@@ -32,7 +32,8 @@ describe('collidersToRadarSegments', () => {
   });
 });
 
-// Names and callouts from commercial games must not appear (SEC-WM-12); see deny-list.ts.
+// Names and callouts from commercial games must not appear (SEC-WM-12). The hybrid
+// token matcher lives in test/support/deny-list.ts (SD-WH-2).
 const ASSET_REFS = ['://', '.png', '.jpg', '.glb', '.gltf', '.wav', '.mp3'];
 
 function strings(value: unknown, out: string[] = []): string[] {
