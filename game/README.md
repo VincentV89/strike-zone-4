@@ -1,6 +1,6 @@
 # StrikeZone game (`game/`)
 
-Vite + TypeScript package for the browser game. This first version holds the **kernel** (`src/kernel/`), the scaffold every later unit builds on, and a placeholder entry (`index.html`, `src/app/main.ts`) that app-shell replaces.
+Vite + TypeScript package for the browser game. It holds the **kernel** (`src/kernel/`), the scaffold every later unit builds on, the **weapons-combat** library (`src/weapons/`, `src/combat/`), and a placeholder entry (`index.html`, `src/app/main.ts`) that app-shell replaces.
 
 ## Commands
 
@@ -11,7 +11,7 @@ Run from `game/` (or with `npm --prefix game run <script>` from the repository r
 | `npm ci`             | Install the pinned devDependencies. There are no runtime dependencies yet.                     |
 | `npm run verify`     | Release gate: lint, typecheck, tests with coverage, build, dist check, clean, advisory audit.  |
 | `npm run lint`       | ESLint with `--max-warnings 0` (includes the import zones) and the Prettier check.             |
-| `npm test`           | Vitest with v8 coverage. Kernel: 95% lines and 90% branches. Global: 80% lines.                |
+| `npm test`           | Vitest with v8 coverage. Kernel, weapons, combat: 95% lines, 90% branches. Global: 80% lines.  |
 | `npm run build`      | `vite build` into `dist/` (`index.html` at the root, hashed files under `dist/assets/`).       |
 | `npm run check:dist` | Fails on inline scripts or `on*` handlers, external URLs in `dist/`, or a non-empty `public/`. |
 | `npm run bench`      | Advisory kernel micro-benchmarks. Not part of verify.                                          |
@@ -26,7 +26,7 @@ Cross-directory imports use the `@sz/<dir>` alias (tsconfig, Vite and Vitest). I
 | Layer | Directories                                                                                                                                            |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | L0    | `kernel` (imports nothing, no browser globals, no `Date`, `Math.random`, `crypto`, `import.meta`)                                                      |
-| L1    | `maps`, `nav`, `player`, `weapons`, `combat`, `stats`, `ai` (bot-ai), `ai/perception`                                                                  |
+| L1    | `maps`, `nav`, `player`, `stats`, `ai` (bot-ai), `ai/perception`; `weapons` (kernel only) and `combat` (kernel and weapons only) have their own zones  |
 | L2    | `sim`, `round`                                                                                                                                         |
 | L3    | `physics` (Rapier only), `render`, `assets` (Three.js only), `ui`, `input`, `audio`, `diagnostics`, `persistence` (only zone allowed to touch storage) |
 | L4    | `app`                                                                                                                                                  |
@@ -41,9 +41,18 @@ Cross-directory imports use the `@sz/<dir>` alias (tsconfig, Vite and Vitest). I
 - `EventBus`: `emit` queues, `drain` delivers once per frame. Emits during a drain go to the next one. A throwing subscriber is reported once through `console.error`.
 - `createRng(seed)`: mulberry32, pinned by golden-value tests. Not for security decisions.
 
+## Weapons and combat
+
+- `@sz/weapons`: `WEAPON_TABLE` (deep-frozen, the only place weapon numbers live), `weaponStats(id)` for ids from outside, `createInventory`, `tickWeapon`, `requestReload`, `switchWeapon`, `setScoped`, `weaponView`. `tickWeapon` runs reload completion, switch, reload request, scope, fire and spread recovery in that order. A locked tick (countdown, dead) never fires.
+- `@sz/combat`: `resolveShot` (one nearest-hit raycast per shot, range capped at the table value, shooter must be alive), `applyResolution` (events in the order ShotFired, ShotImpact, HitConfirmed, DamageTaken, ActorKilled), `applyDamage`, `createVitals`.
+- Every exported function is total: hostile input gives a no-op, a `miss` or a clamped value, never a throw.
+- Each shot draws exactly 3 values from the injected `Rng` (cone radius, cone angle, yaw kick); a tick without a shot draws none. match-loop may share one stream across holders.
+- match-loop owns the call order (player, then bots by ascending id; resolve and apply each shot before the next holder fires), passes `locked: true` for dead holders, emits `NoiseEmitted` from `WEAPON_TABLE[w].noiseRadiusM` and disables dead actors' hitboxes.
+- `test/combat/scenarios.test.ts` pins a 600-tick duel by snapshot and by an FNV-1a digest literal. A verify run that prints `Snapshots: N written` means a snapshot was missing: investigate before committing.
+
 ## Test support
 
-`test/support/` holds port fakes (`createFakePhysics`, `createFakeMover`), `createRecordingBus` and `describePhysicsQueryContract`. world-maps runs the same contract suite against the Rapier adapter.
+`test/support/` holds port fakes (`createFakePhysics`, `createFakeMover`), `createRecordingBus`, `describePhysicsQueryContract`, `createCountingRng`, the weapon tick driver and the combat scene helpers. world-maps runs the same contract suite against the Rapier adapter.
 
 ## Rules for later units
 

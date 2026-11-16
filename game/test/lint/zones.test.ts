@@ -2,6 +2,7 @@
 // eslint.config.mjs and proves every zone entry fires. Cases are generated from
 // eslint.zones.mjs, plus a hand-pinned no-cheat list so deleting that row fails too.
 import { fileURLToPath } from 'node:url';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ESLint, type Linter } from 'eslint';
 import tseslint from 'typescript-eslint';
@@ -166,5 +167,103 @@ describe('outside the zones', () => {
     expect(
       await ruleHits('export const r = Math.random();\n', file, 'no-restricted-properties'),
     ).toBe(1);
+  });
+});
+
+// Hand-pinned: weapons-combat boundary (SEC-WC-12, SEC-WC-21, SEC-WC-22, ADR-WC-8).
+describe('weapons and combat zones (hand-pinned)', () => {
+  const dirs = ['src/weapons/__canary__.ts', 'src/combat/__canary__.ts'];
+
+  it.each(dirs)('%s bans console, fetch, timers, Date and Math.random', async (file) => {
+    expect(await ruleHits("console.error('x');\n", file, 'no-restricted-globals')).toBe(1);
+    expect(await ruleHits("export const f = fetch('x');\n", file, 'no-restricted-globals')).toBe(1);
+    expect(
+      await ruleHits('export const t = setTimeout(() => 0, 1);\n', file, 'no-restricted-globals'),
+    ).toBe(1);
+    expect(await ruleHits('export const d = Date.now();\n', file, 'no-restricted-globals')).toBe(1);
+    expect(
+      await ruleHits('export const r = Math.random();\n', file, 'no-restricted-properties'),
+    ).toBe(1);
+  });
+
+  it('weapons imports only the kernel: @sz/combat and @sz/nav fail, @sz/kernel passes', async () => {
+    const file = 'src/weapons/tick-weapon.ts';
+    expect(await ruleHits(importOf('@sz/combat'), file, 'no-restricted-imports')).toBe(1);
+    expect(await ruleHits(importOf('@sz/nav'), file, 'no-restricted-imports')).toBe(1);
+    expect(await ruleHits(importOf('@sz/kernel'), file, 'no-restricted-imports')).toBe(0);
+    expect(await ruleHits(importOf('./spread'), file, 'no-restricted-imports')).toBe(0);
+  });
+
+  it('combat imports only the kernel and weapons, never deep paths', async () => {
+    const file = 'src/combat/resolve-shot.ts';
+    expect(await ruleHits(importOf('@sz/weapons'), file, 'no-restricted-imports')).toBe(0);
+    expect(await ruleHits(importOf('@sz/weapons/guards'), file, 'no-restricted-imports')).toBe(1);
+    expect(await ruleHits(importOf('@sz/physics'), file, 'no-restricted-imports')).toBe(1);
+  });
+
+  it('bot-ai may import @sz/weapons but still never @sz/combat', async () => {
+    const file = 'src/ai/brain.ts';
+    expect(await ruleHits(importOf('@sz/weapons'), file, 'no-restricted-imports')).toBe(0);
+    expect(await ruleHits(importOf('@sz/combat'), file, 'no-restricted-imports')).toBe(1);
+  });
+});
+
+// ADR-WC-7: every src/<dir> matches exactly one zone, so zone order never matters and a new
+// directory cannot fall outside every zone.
+describe('zone coverage (ADR-WC-7)', () => {
+  const PLANNED = [
+    'kernel',
+    'maps',
+    'nav',
+    'player',
+    'weapons',
+    'combat',
+    'stats',
+    'ai',
+    'ai/perception',
+    'sim',
+    'round',
+    'physics',
+    'render',
+    'assets',
+    'ui',
+    'input',
+    'audio',
+    'diagnostics',
+    'persistence',
+    'app',
+  ];
+
+  function underGlob(glob: string, file: string): boolean {
+    if (!glob.endsWith('/**')) throw new Error(`unsupported zone glob ${glob}`);
+    return file.startsWith(glob.slice(0, -2));
+  }
+
+  function zonesFor(file: string): string[] {
+    return ZONES.filter(
+      (z) =>
+        z.files.some((g) => underGlob(g, file)) &&
+        !(z.ignores ?? []).some((g) => underGlob(g, file)),
+    ).map((z) => z.name);
+  }
+
+  it('every zone glob has the src/<dir>/** shape', () => {
+    for (const z of ZONES)
+      for (const g of [...z.files, ...(z.ignores ?? [])]) {
+        expect(g).toMatch(/^src\/[a-z/]+\/\*\*$/);
+      }
+  });
+
+  const onDisk = readdirSync(join(ROOT, 'src'), { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
+
+  it.each([...new Set([...PLANNED, ...onDisk])])('src/%s matches exactly one zone', (dir) => {
+    expect(zonesFor(`src/${dir}/__probe__.ts`)).toHaveLength(1);
+  });
+
+  it('weapons and combat are in their own zones', () => {
+    expect(zonesFor('src/weapons/x.ts')).toEqual(['weapons (L1)']);
+    expect(zonesFor('src/combat/x.ts')).toEqual(['combat (L1)']);
   });
 });

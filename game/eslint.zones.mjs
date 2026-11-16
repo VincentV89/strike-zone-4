@@ -75,6 +75,27 @@ const PURE_PROPERTIES = [
   { object: 'Math', property: 'random', message: 'SEC-K-07: use the injected Rng (BR-K-34).' },
 ];
 
+/**
+ * weapons and combat only (ADR-WC-8): no console, network, workers or timers. Time enters as
+ * ctx.now and ctx.dt. The shared lists for other zones are unchanged (residual risk R-6).
+ */
+const UNIT_GLOBALS = [
+  ...PURE_GLOBALS,
+  ...[
+    'console',
+    'fetch',
+    'XMLHttpRequest',
+    'WebSocket',
+    'Worker',
+    'setTimeout',
+    'setInterval',
+    'queueMicrotask',
+  ].map((name) => ({
+    name,
+    message: `SEC-WC-22/ADR-WC-8: ${name} is not allowed in weapons or combat.`,
+  })),
+];
+
 /** @type {ReadonlyArray<Zone>} */
 export const ZONES = [
   {
@@ -101,17 +122,60 @@ export const ZONES = [
   },
   {
     name: 'domain (L1)',
-    files: [
-      'src/maps/**',
-      'src/nav/**',
-      'src/player/**',
-      'src/weapons/**',
-      'src/combat/**',
-      'src/stats/**',
-    ],
+    files: ['src/maps/**', 'src/nav/**', 'src/player/**', 'src/stats/**'],
     forbiddenImportPatterns: L1_IMPORTS,
     allowed: ['@sz/kernel', '@sz/nav'],
     forbiddenGlobals: PURE_GLOBALS,
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: [],
+  },
+  {
+    // ADR-WC-7: own zone, not in domain (L1), so no file matches two zones. One pattern bans
+    // every non-relative import except @sz/kernel; it subsumes L1_IMPORTS (which would
+    // otherwise report a second time for the same import).
+    name: 'weapons (L1)',
+    files: ['src/weapons/**'],
+    forbiddenImportPatterns: [
+      imp('^(?!@sz/kernel$)[^.]', 'SEC-WC-21: weapons imports only @sz/kernel.', [
+        '@sz/combat',
+        '@sz/player',
+        '@sz/nav',
+        '@sz/weapons',
+        '@sz/kernel/rng',
+        '@sz/sim',
+        '@sz/physics',
+        'three',
+        '@dimforge/rapier3d-compat',
+        'gl-matrix',
+      ]),
+    ],
+    allowed: ['@sz/kernel', './weapon-table'],
+    forbiddenGlobals: UNIT_GLOBALS,
+    forbiddenProperties: PURE_PROPERTIES,
+    forbiddenSyntax: [],
+  },
+  {
+    name: 'combat (L1)',
+    files: ['src/combat/**'],
+    forbiddenImportPatterns: [
+      imp(
+        '^(?!@sz/(kernel|weapons)$)[^.]',
+        'SEC-WC-21: combat imports only @sz/kernel and @sz/weapons.',
+        [
+          '@sz/player',
+          '@sz/physics',
+          '@sz/nav',
+          '@sz/ai',
+          '@sz/sim',
+          '@sz/weapons/weapon-table',
+          '@sz/kernel/rng',
+          'three',
+          '@dimforge/rapier3d-compat',
+        ],
+      ),
+    ],
+    allowed: ['@sz/kernel', '@sz/weapons', './guards'],
+    forbiddenGlobals: UNIT_GLOBALS,
     forbiddenProperties: PURE_PROPERTIES,
     forbiddenSyntax: [],
   },
@@ -143,7 +207,7 @@ export const ZONES = [
         ['@sz/player', '@sz/combat/damage'],
       ),
     ],
-    allowed: ['@sz/kernel', '@sz/ai/perception', '@sz/nav'],
+    allowed: ['@sz/kernel', '@sz/ai/perception', '@sz/nav', '@sz/weapons'],
     forbiddenGlobals: PURE_GLOBALS,
     forbiddenProperties: PURE_PROPERTIES,
     forbiddenSyntax: [],
