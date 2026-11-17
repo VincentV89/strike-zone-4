@@ -1,0 +1,21 @@
+// Public surface of ui (`@sz/ui`). Re-exports only; only app-shell imports it.
+export { createUi } from './dom/mount';
+export type { Ui, UiEnv, UiStats } from './dom/mount';
+export * from './core/boot-models';
+export * from './core/controls-table';
+export * from './core/end-model';
+export * from './core/history-model';
+export * from './core/pause-model';
+export * from './core/screens';
+export * from './core/settings-model';
+export * from './core/setup-model';
+export type { DialogScreen, SendIntent, UiIntent, UiIntentKind } from './core/intents';
+export { HEARD_SHOT_RADIUS_M, effectsContext } from './core/effects';
+export type { EffectsContext, HudEffects } from './core/effects';
+export { HIDDEN_HUD, createHudModeller, toHudViewModel } from './core/hud-model';
+export type { HudInput, HudViewModel } from './core/hud-model';
+export { MAX_HUD_PATCHES, diffHud } from './core/hud-diff';
+export type { HudPatch } from './core/hud-diff';
+export { RADAR_PX_PER_M, toRadarModel } from './core/radar';
+export type { RadarInput, RadarModel } from './core/radar';
+export { TOKENS } from './core/contrast';
